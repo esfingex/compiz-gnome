@@ -208,3 +208,56 @@ C++ Vulkan Engine                       Kernel / SCM_RIGHTS                     
       ├──── Wait(Release Sync FD) ──────────────┤                                           │
       └──── Ready for Frame N+1 ────────────────┘                                           │
 ```
+
+---
+
+## 6. Implementación C++20: Clase `WaterComputePass` (Frame Graph Node)
+
+Implementación concreta del nodo de simulación de agua desacoplado como parte del **Render Graph / Frame Graph Engine**:
+
+```cpp
+// WaterComputePass.hpp (C++20 Engine)
+#pragma once
+#include "vulkan/frame_graph.hpp"
+
+class WaterComputePass : public EffectNode {
+public:
+    void setup(FrameGraph& fg, ResourceHandle inputDesktop, ResourceHandle outputNormalMap) override {
+        // 1. Pass de simulación física Compute Shader (120Hz fixed dt)
+        fg.addComputePass("WaterPhysicsCompute", [&](FrameGraphBuilder& builder) {
+            builder.read(heightMapPrev_)
+                   .write(heightMapCurr_)
+                   .write(heightMapNext_)
+                   .dispatch((width_ + 15) / 16, (height_ + 15) / 16, 1);
+        });
+
+        // 2. Pass de generación de mapa de normales y derivación de altura
+        fg.addComputePass("WaterNormalMapGen", [&](FrameGraphBuilder& builder) {
+            builder.read(heightMapNext_)
+                   .write(outputNormalMap) // Registrado como FrameGraphResource exportable vía DMA-BUF
+                   .setMemoryBarrier(VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_WRITE_BIT);
+        });
+    }
+
+    void execute(VkCommandBuffer cmd, FrameData& frameData) override {
+        // Enlazar Descriptor Buffers VK_EXT_descriptor_buffer & Push Constants (dt, waveSpeed, fade)
+        vkCmdBindDescriptorBuffersEXT(cmd, 1, &descriptorBufferBindingInfo_);
+        vkCmdPushConstants(cmd, pipelineLayout_, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(WaterPushConstants), &pushConstants_);
+        vkCmdDispatch(cmd, (width_ + 15) / 16, (height_ + 15) / 16, 1);
+    }
+
+private:
+    uint32_t width_ = 1920;
+    uint32_t height_ = 1080;
+    VkDescriptorBufferBindingInfoEXT descriptorBufferBindingInfo_{};
+    VkPipelineLayout pipelineLayout_ = VK_NULL_HANDLE;
+    
+    struct WaterPushConstants {
+        float dt = 1.0f / 120.0f;
+        float fade = 0.995f;
+        float waveSpeed = 0.5f;
+        float deltaScale = 1.0f / 1920.0f;
+        uint32_t frameIndex = 0;
+    } pushConstants_;
+};
+```
