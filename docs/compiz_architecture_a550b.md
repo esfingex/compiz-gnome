@@ -13,46 +13,57 @@ Compiz se diseñó como un gestor de composición (*composite manager*) para X11
 Compiz extendía el comportamiento reemplazando punteros a funciones vtable en tiempo de ejecución:
 - `screen->paintOutput()`: Inicia el frame de renderizado.
 - `window->paintWindow()`: Dibuja cada ventana. Los plugins alteran matrices de transformación, vértices o shaders.
-- **Deformación Geométrica (Mesh Grids)**: Plugins como `Wobbly` (ventanas gelatinosas) subdividían la textura de la ventana en una malla 2D de vértices y aplicaban una simulación física de masa-resorte (*spring-damper*).
-- **Proyección 3D (Scene Graph / Skybox)**: Plugins como `Cube` proyectaban los escritorios virtuales (*viewports*) sobre las caras de un prisma 3D o esfera.
+- **Deformación Geométrica (Mesh Grids)**: Plugins como `Wobbly` subdividían la textura en una malla 2D de vértices y aplicaban física de masa-resorte (*spring-damper*).
+- **Proyección 3D (Scene Graph / Skybox)**: Plugins como `Cube` proyectaban los escritorios virtuales sobre las caras de un prisma 3D o esfera.
 
 ---
 
 ## 2. Mapeo a GNOME Moderno (Wayland + Mutter)
 
-En GNOME 40+ y 50+, la arquitectura cambia drásticamente:
+En entornos Wayland modernos (GNOME Shell / Mutter), no existe un gestor de composición desacoplado X11. Mutter actúa como servidor Wayland y compositor único dentro del proceso principal de GNOME Shell.
 
-| Componente | Compiz (X11 Clásico) | GNOME Moderno (Wayland) |
-| :--- | :--- | :--- |
-| **Display Server** | X.Org Server (X11) | **Mutter** (Servidor Wayland integrado) |
-| **Compositor** | Compiz (Proceso independiente) | **Mutter / GNOME Shell** (Proceso único) |
-| **Texturas de Ventana** | XComposite + GLX | Subsuperficies Wayland (`wl_surface` / `dma-buf`) |
-| **Scene Graph** | Custom OpenGL matrix stack | **Clutter** (Cogl / GSK / GTK4 Rendering Engine) |
-| **API de Extensiones** | Plugins C/C++ nativos (DL open / VTable override) | **GJS** (JavaScript / SpiderMonkey) + Shaders GLSL |
+### Arquitectura Híbrida de Doble Capa (`compiz-gnome`)
 
----
+Para migrar la experiencia de Compiz sin comprometer la estabilidad del sistema, `compiz-gnome` adopta una **Arquitectura de Doble Capa**:
 
-## 3. Estrategia de Migración y Desarrollo
+1. **Capa 1: Extensión GJS de GNOME Shell (Ligera & In-Process)**:
+   - Intercepta los `MetaWindowActor` (ClutterActor) de Mutter.
+   - Extrae el buffer de textura de la ventana en formato **DMA-BUF** (`zwp_linux_dmabuf_v1` / `CoglTexture`).
+   - Envía handles IPC (`dmabuf_fd`, `drm_format`, `modifier`, `acquire_sync_fd`) al motor C++.
+   - Aplica un `ClutterEffect` de renderizado passthrough directo (`gl_FragColor = texture(engine_output_dmabuf, uv)`).
 
-Para lograr el nivel de flexibilidad de Compiz en GNOME moderno sin modificar los fuentes de Mutter:
-
-1. **Capa GJS / Clutter (Extensión GNOME Shell)**:
-   - Intercepta actores de ventanas en GNOME Shell (`global.get_window_actors()`).
-   - Aplica efectos de transformación (`ClutterEffect`) y Shaders GLSL personalizados.
-
-2. **Capa C++ / Vulkan (Motor de Física y Render Offscreen)**:
-   - Realiza cálculos intensivos en C++20 (ej. mallas deformables de ventanas, física de fluidos, cálculo de matrices 3D).
-   - Exporta resultados mediante IPC / Shared Memory / `dma-buf` para que GNOME Shell los dibuje a 60+ FPS sin saturar el hilo de JavaScript (GJS).
+2. **Capa 2: Motor Headless C++20 / Vulkan (Aislado & Offscreen)**:
+   - Recibe la textura DMA-BUF mediante `VK_KHR_external_memory_fd`.
+   - Procesa la física de deformación (Wobbly), ecuaciones de onda (Water), transformaciones 3D (Cube/Ring/Shift) en **Vulkan Compute & Graphics Pipelines**.
+   - Exporta el resultado de vuelta como una textura DMA-BUF sin copias entre memoria RAM/VRAM (**Zero-Copy Real**).
 
 ---
 
-## 4. Comparativa: Compiz 0.9 vs. Wayfire vs. GNOME Shell / Mutter
+## 3. Manejo de Identidad de Ventana y Sincronización
 
-| Criterio | Compiz 0.9.14.2 (X11) | Wayfire (Wayland) | Nuestro Proyecto (Compiz-GNOME) |
-| :--- | :--- | :--- | :--- |
-| **Rol en el sistema** | Composite Manager para X11 | Servidor Wayland autónomo (wlroots) | Extensión + Engine C++/Vulkan para GNOME Shell |
-| **Base de Código** | C++03 / C++11 (Wrapper sobre C X11) | C++17 / C++20 moderno (wlroots) | C++20 + GJS / Shaders GLSL |
-| **Arquitectura de Plugins** | `CompPlugin` vtables dinámicas | `wf::plugin_interface_t` + señales C++ | ClutterEffect / Shaders + Helper C++ |
-| **Compatibilidad GNOME** | Obsolescente (Requiere sesión X11) | Incompatible (Es otro compositor rival de Mutter) | **Nativa para GNOME Shell 50+ (Wayland)** |
-| **Utilidad de Referencia** | Código original de referencia histórica | **Referencia matemática limpia en C++17/20** | Objetivo final ejecutable en GNOME Shell |
+### A. Identificador Estable de Ventana (`uint64_t WindowID`)
+Los punteros de `MetaWindowActor` en Clutter se destruyen dinámicamente durante unminimize o cambio de workspace.
+- **Fuente de verdad**: `uint64_t WindowID` basado en `MetaWindow::get_id()` o hash estable.
+- **Estado del Motor C++**: El motor C++ mantiene un `std::unordered_map<WindowID, WindowState>` con las mallas de masa-resorte, SSBOs de partículas e historia de simulación.
 
+### B. Uso de Wayfire como Referencia Técnica
+- **Uso exclusivo**: Referencia de **fórmulas matemáticas puras** (ecuaciones de resortes, matrices MVP, transformaciones elípticas).
+- **NO reutilizado**: La gestión de textura EGL/FBO de Wayfire, binds implícitos GL y punteros crudos se sustituyen por **Vulkan 1.3 Data-Oriented Design (DoD)**, `VmaAllocation`, `vk::raii` y `VkTimelineSemaphore`.
+
+---
+
+## 4. Detalles de Implementación de Producción en Wayland/Vulkan
+
+### 4.1. Intercambio de Texturas: DMA-BUF + Modifiers + Sync FD
+- **Capa 1 (GJS)** obtiene `MetaTexture` / `CoglTexture` $\to$ Extrae `dmabuf_fd` + `drm_format` + `modifier` (vía `EGL_EXT_image_dma_buf_import_modifiers`).
+- **IPC (Protobuf + SCM_RIGHTS)** transmite: `fd`, `width`, `height`, `stride`, `format`, `modifier`, `acquire_sync_fd`.
+- **Capa 2 (C++/Vulkan)** importa la imagen con `VkImportMemoryFdInfoKHR` y sincroniza con `VkImportSemaphoreFdInfoKHR` (Timeline Semaphore).
+
+### 4.2. Modelo de Hilos (Threading Model)
+- **Hilo Principal GJS (UI Thread)**: Solo IPC no bloqueante (`send()`, `poll()`). **Cero llamadas Vulkan.**
+- **Hilo Render Motor C++**: `vkQueueSubmit2` con Timeline Semaphores $\to$ Señala `release_sync_fd` para el scanout de Mutter.
+
+### 4.3. Manejo de HiDPI / Fractional Scaling
+- Mutter compone en **coordenadas lógicas**. Vulkan renderiza en **píxeles físicos**.
+- El IPC incluye `float scale_factor` por ventana/monitor.
+- Parámetros de física (radio de onda, rigidez de resorte) se escalan por `scale_factor` en CPU antes de Push Constants.
