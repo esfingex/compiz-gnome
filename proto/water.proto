@@ -1,0 +1,30 @@
+syntax = "proto3";
+
+package compiz.engine;
+
+// Impacto de gota / arrastre de ratón para el plugin Water
+message WaterImpact {
+  uint64 window_id = 1;       // ID estable de la ventana (MetaWindow::get_id)
+  float  x = 2;               // Coordenada normalizada X [0.0, 1.0]
+  float  y = 3;               // Coordenada normalizada Y [0.0, 1.0]
+  float  strength = 4;        // Fuerza del splash / velocidad de arrastre [0.0, 1.0]
+  float  radius = 5;          // Radio del splash en px normalizados
+  uint64 timestamp_ns = 6;    // Monotonic timestamp en nanosegundos
+}
+
+// Actualización de superficie/ventana enviada por GJS al motor C++
+message SurfaceUpdate {
+  uint64 window_id = 1;
+  uint32 width = 2;
+  uint32 height = 3;
+  uint64 drm_modifier = 4;    // Modifier negociado
+  uint32 timeline_value = 5;  // Valor de la Timeline Semaphore a esperar
+}
+
+// Comando unificado de control IPC
+message EngineCommand {
+  oneof payload {
+    WaterImpact water_impact = 1;
+    SurfaceUpdate surface_update = 2;
+  }
+}
