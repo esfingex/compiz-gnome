@@ -89,9 +89,10 @@ Para evitar **tearing, frame corruption o deadlocks** entre el motor Vulkan y Mu
 ### C. Arquitectura Effect Graph (Render Graph en C++20)
 El motor organiza los pases de renderizado mediante un **Render Graph** declarativo:
 ```cpp
-struct EffectNode {
-    virtual void setup(FrameGraph& fg, ResourceHandle input, ResourceHandle output) = 0;
-    virtual void execute(VkCommandBuffer cmd, FrameData& fd) = 0;
+template <typename T>
+concept EffectNode = requires(T& node, FrameGraph& fg, FrameData& fd, vk::raii::CommandBuffer& cmd) {
+    { node.setup(fg) } -> std::same_as<void>;
+    { node.execute(cmd, fd) } -> std::same_as<void>;
 };
 ```
 - Deducción automática de barreras `VkImageMemoryBarrier2` en Vulkan 1.3.
@@ -99,3 +100,51 @@ struct EffectNode {
 
 ### D. Descriptor Buffers (`VK_EXT_descriptor_buffer`)
 Sustitución completa de `vkUpdateDescriptorSets` por **Descriptor Buffers** de Vulkan 1.3, vinculando descriptores con offsets en Push Constants para costo cero de CPU por ventana.
+
+---
+
+## 4. Aliasing de Recursos GPU (Transient Memory Aliasing Map)
+
+El Frame Graph agrupa los recursos cuya vida útil no se solapa dentro del mismo frame para compartir memoria `VkDeviceMemory` mediante VMA (Vulkan Memory Allocator):
+
+| Grupo de Aliasing | Consumidores de Pases Vulkan | Formato Recomendado | Memoria a 4K |
+| :--- | :--- | :--- | :--- |
+| `Transient_Color_0` | Water Sim (Height A), Burn (Front), Blur (Down 1) | `VK_FORMAT_R16_SFLOAT` / `R8G8B8A8_UNORM` | ~32 MB |
+| `Transient_Color_1` | Water Sim (Height B), Blur (Down 2), Shift (Reflect) | `VK_FORMAT_R16_SFLOAT` / `R8G8B8A8_UNORM` | ~32 MB |
+| `Transient_Normal` | Water Sim (Normal Map), Wobbly (Normal), CubeAddon | `VK_FORMAT_R16G16B16A16_SFLOAT` | ~64 MB |
+| `Transient_Particle_SSBO` | Burn, Fire, Firepaint, Explode, Showmouse | `std430` struct (pos, vel, life, color) | ~1.6 MB |
+| `Transient_Mesh_SSBO` | Animation Suite (Mesh 1.3 Output), Wobbly (Grid) | `std430` struct (pos, uv, normal) | Variable |
+
+---
+
+## 5. Estructura de Módulos C++20 Definitiva
+
+```cpp
+// engine.core.module.cpp
+export module engine.core;
+export import engine.vulkan;       // RAII wrappers, VMA, Timeline Semaphores
+export import engine.framegraph;   // FrameGraph, ResourceHandle, PassNode
+export import engine.math;         // FixedTimestep 120Hz, SpringDamper, WaveFDM
+export import engine.ipc;          // Protobuf, Unix Domain Socket, SCM_RIGHTS
+export import engine.window;       // WindowState, WindowID (uint64_t)
+
+// engine.effects.module.cpp
+export module engine.effects;
+export import engine.effects.water;      // WaterComputePass, WaterRenderPass
+export import engine.effects.wobbly;     // WobblyComputePass (Spring Grid)
+export import engine.effects.cube;       // CubeRenderPass (Skybox, Sphere Morph)
+export import engine.effects.burn;       // BurnComputePass (Particles)
+export import engine.effects.shift;      // ShiftRenderPass (Planar Reflection)
+export import engine.effects.ring;       // RingRenderPass (True 3D Orbit)
+export import engine.effects.animation;  // AnimationMeshPass (Mesh Shaders 1.3)
+```
+
+---
+
+## 6. Estrategia de Implementación: Vertical Slice MVP (Water Ripple Drag)
+
+El plan de construcción del núcleo iniciará con el **Vertical Slice de Prueba**:
+
+1. **GJS Extension**: Intercepta `motion-notify-event` al arrastrar una ventana $\to$ envía `WaterImpact(x, y, strength)` por IPC.
+2. **C++20 Engine**: Instancia `WaterComputePass` dentro del `FrameGraph`. Ejecuta `water_sim.comp` a 120Hz fijos.
+3. **DMA-BUF Roundtrip**: Exporta `normal_map_fd` $\to$ Mutter aplica `water_effect.frag` sin copias RAM/VRAM.
