@@ -1,0 +1,52 @@
+namespace compiz.ipc;
+
+enum EngineCmdType : ubyte {
+    None = 0,
+    RegisterWindow = 1,
+    UnregisterWindow = 2,
+    WaterImpact = 3,
+    WaterConfig = 4,
+    SyncFrame = 5,
+    ReleaseFrame = 6
+}
+
+table WindowMetadata {
+    window_id: ulong;
+    width: uint;
+    height: uint;
+    drm_format: uint;
+    modifier: ulong;
+    scale_factor: float;
+}
+
+table WaterImpactPayload {
+    window_id: ulong;
+    x: float;
+    y: float;
+    strength: float;
+}
+
+table SyncFramePayload {
+    window_id: ulong;
+    timeline_value: ulong;
+}
+
+table ReleaseFramePayload {
+    window_id: ulong;
+    timeline_value: ulong;
+}
+
+union EnginePayload {
+    WindowMetadata,
+    WaterImpactPayload,
+    SyncFramePayload,
+    ReleaseFramePayload
+}
+
+table EngineMessage {
+    cmd_type: EngineCmdType;
+    payload: EnginePayload;
+    sequence_id: ulong;
+}
+
+root_type EngineMessage;

@@ -13,8 +13,9 @@ El proyecto `compiz-gnome` implementa una arquitectura híbrida no invasiva divi
 │   - CompizTiling / Maximumize (algoritmos de espacio libre)               │
 │   - CompizGroup & Shelf (pestañas y miniaturización)                      │
 │   - Lock-Free Input Ring Buffer (memfd_create para Annotate/Showmouse)     │
+│   - Módulo C de Soporte (libcompiz-gnome-dmabuf.so para EGL/DMA-BUF GJS)   │
 └─────────────────────────────────────┬─────────────────────────────────────┘
-                                      │ IPC (Unix Domain Socket / Protobuf)
+                                      │ IPC (Unix Domain Socket / FlatBuffers)
                                       │ SCM_RIGHTS (DMA-BUF & Sync FDs)
                                       ▼
 ┌───────────────────────────────────────────────────────────────────────────┐
@@ -94,35 +95,61 @@ Para evitar **tearing, frame corruption o deadlocks** entre el motor Vulkan y Mu
 
 ---
 
-## 4. Esquema Protobuf del Protocolo IPC (`water.proto`)
+## 4. Esquema FlatBuffers del Protocolo IPC (`schemas/ipc.fbs`)
 
-```protobuf
-syntax = "proto3";
-package compiz.engine;
+```flatbuffers
+namespace compiz.ipc;
 
-message WaterImpact {
-  uint64 window_id = 1;
-  float  x = 2;
-  float  y = 3;
-  float  strength = 4;
-  float  radius = 5;
-  uint64 timestamp_ns = 6;
+enum EngineCmdType : ubyte {
+    None = 0,
+    RegisterWindow = 1,
+    UnregisterWindow = 2,
+    WaterImpact = 3,
+    WaterConfig = 4,
+    SyncFrame = 5,
+    ReleaseFrame = 6
 }
 
-message SurfaceUpdate {
-  uint64 window_id = 1;
-  uint32 width = 2;
-  uint32 height = 3;
-  uint64 drm_modifier = 4;
-  uint32 timeline_value = 5;
+table WindowMetadata {
+    window_id: ulong;
+    width: uint;
+    height: uint;
+    drm_format: uint;
+    modifier: ulong;
+    scale_factor: float;
 }
 
-message EngineCommand {
-  oneof payload {
-    WaterImpact water_impact = 1;
-    SurfaceUpdate surface_update = 2;
-  }
+table WaterImpactPayload {
+    window_id: ulong;
+    x: float;
+    y: float;
+    strength: float;
 }
+
+table SyncFramePayload {
+    window_id: ulong;
+    timeline_value: ulong;
+}
+
+table ReleaseFramePayload {
+    window_id: ulong;
+    timeline_value: ulong;
+}
+
+union EnginePayload {
+    WindowMetadata,
+    WaterImpactPayload,
+    SyncFramePayload,
+    ReleaseFramePayload
+}
+
+table EngineMessage {
+    cmd_type: EngineCmdType;
+    payload: EnginePayload;
+    sequence_id: ulong;
+}
+
+root_type EngineMessage;
 ```
 
 ---
@@ -149,7 +176,7 @@ export module engine.core;
 export import engine.vulkan;       // RAII wrappers, VMA, Timeline Semaphores
 export import engine.framegraph;   // FrameGraph, ResourceHandle, PassNode
 export import engine.math;         // FixedTimestep 120Hz, SpringDamper, WaveFDM
-export import engine.ipc;          // Protobuf, Unix Domain Socket, SCM_RIGHTS
+export import engine.ipc;          // FlatBuffers, Unix Domain Socket, SCM_RIGHTS
 export import engine.window;       // WindowState, WindowID (uint64_t)
 
 // engine.effects.module.cpp
@@ -165,7 +192,15 @@ export import engine.effects.animation;  // AnimationMeshPass (Mesh Shaders 1.3)
 
 ---
 
-## 7. Estrategia de Implementación: Vertical Slice MVP (Water Ripple Drag)
+## 7. Módulo Auxiliar GJS C (`libcompiz-gnome-dmabuf.so`)
+
+Para garantizar la interoperabilidad de baja latencia en GNOME Shell cuando la API GJS pura carece de bindings nativos expuestos:
+- **Exportación DMA-BUF**: Función `compiz_dmabuf_export_texture()` usando `EGLImage` y `glExportDRMImageMESA` / `gbm_bo_get_fd`.
+- **Sincronización EGL**: Función `compiz_egl_wait_sync_fd()` que ejecuta `eglWaitSyncKHR` pasándole el `sync_fd` recibido por IPC.
+
+---
+
+## 8. Estrategia de Implementación: Vertical Slice MVP (Water Ripple Drag)
 
 Lista de comprobación de fontanería (Plumbing Checklist) para el primer prototipo funcional:
 
