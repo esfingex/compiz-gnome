@@ -1,0 +1,30 @@
+#version 460 core
+
+layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
+
+layout(set = 0, binding = 0) uniform sampler2D u_heightMap;
+layout(rgba16f, set = 0, binding = 1) uniform image2D u_normalMap;
+
+layout(push_constant) uniform PushConstants {
+    vec2 resolution;
+    float heightScale;
+} pc;
+
+void main() {
+    ivec2 globalId = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 dim = imageSize(u_normalMap);
+    if (globalId.x >= dim.x || globalId.y >= dim.y) return;
+
+    vec2 texel = 1.0 / pc.resolution;
+    vec2 uv = (vec2(globalId) + 0.5) / pc.resolution;
+
+    float hL = texture(u_heightMap, uv + vec2(-texel.x, 0.0)).r;
+    float hR = texture(u_heightMap, uv + vec2(texel.x, 0.0)).r;
+    float hD = texture(u_heightMap, uv + vec2(0.0, -texel.y)).r;
+    float hU = texture(u_heightMap, uv + vec2(0.0, texel.y)).r;
+    float height = texture(u_heightMap, uv).r;
+
+    // Derivadas centrales para mapa de normales (XYZ + Height)
+    vec3 normal = normalize(vec3(hL - hR, hD - hU, 2.0 / pc.heightScale));
+    imageStore(u_normalMap, globalId, vec4(normal, height));
+}

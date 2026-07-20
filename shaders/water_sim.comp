@@ -1,0 +1,65 @@
+#version 460 core
+#extension GL_EXT_shader_explicit_arithmetic_types_f16 : require
+
+layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
+
+layout(set = 0, binding = 0) uniform sampler2D u_prevHeight; // R16_SFLOAT
+layout(r16f, set = 0, binding = 1) uniform image2D u_currHeight; // R16_SFLOAT (R/W)
+layout(r16f, set = 0, binding = 2) uniform image2D u_nextHeight; // R16_SFLOAT (Write)
+
+layout(push_constant) uniform PushConstants {
+    float dt;           // Fixed: 1/120s
+    float fade;         // 0.995
+    float waveSpeed;    // Clamped by CFL
+    float deltaScale;   // 1.0 / width
+    uint  frameIndex;
+    float impactX;      // Normalized [0,1], -1 = none
+    float impactY;
+    float impactStrength;
+} pc;
+
+// Shared Memory LDS Tile: 18x18 f16 (Halo 1px para workgroup de 16x16)
+shared float16_t tile[18][18];
+
+void main() {
+    ivec2 globalId = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 localId  = ivec2(gl_LocalInvocationID.xy);
+    ivec2 dim      = imageSize(u_currHeight);
+
+    if (globalId.x >= dim.x || globalId.y >= dim.y) return;
+
+    // 1. Carga cooperativa a memoria compartida LDS (18x18 f16)
+    uint linearId = gl_LocalInvocationIndex;
+    for (uint i = linearId; i < 324u; i += 256u) {
+        int tx = int(i % 18u);
+        int ty = int(i / 18u);
+        ivec2 loadPos = clamp(globalId - ivec2(1, 1) + ivec2(tx, ty), ivec2(0), dim - 1);
+        tile[ty][tx] = float16_t(imageLoad(u_currHeight, loadPos).r);
+    }
+    barrier();
+
+    int cx = localId.x + 1;
+    int cy = localId.y + 1;
+
+    float u_curr_c = float(tile[cy][cx]);
+    float u_prev_c = texture(u_prevHeight, (vec2(globalId) + 0.5) / vec2(dim)).r;
+
+    // 2. Laplaciano (Stencil de 5 puntos desde memoria LDS - CERO lecturas VRAM extra)
+    float laplacian = float(tile[cy-1][cx]) + float(tile[cy+1][cx]) +
+                      float(tile[cy][cx-1]) + float(tile[cy][cx+1]) - 4.0 * u_curr_c;
+
+    // 3. Integración de Verlet
+    float c2_dt2 = pc.waveSpeed * pc.waveSpeed * pc.dt * pc.dt;
+    float u_next = (laplacian * c2_dt2 + 2.0 * u_curr_c - u_prev_c) * pc.fade;
+
+    // 4. Inyección de impacto (Arrastre del ratón)
+    if (pc.impactX >= 0.0) {
+        vec2 uv = vec2(globalId) / vec2(dim);
+        float dist2 = dot(uv - vec2(pc.impactX, pc.impactY), uv - vec2(pc.impactX, pc.impactY));
+        if (dist2 < 0.005) {
+            u_next += pc.impactStrength * exp(-dist2 / 0.001);
+        }
+    }
+
+    imageStore(u_nextHeight, globalId, vec4(u_next, 0.0, 0.0, 0.0));
+}
