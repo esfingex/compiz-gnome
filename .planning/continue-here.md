@@ -1,13 +1,12 @@
 # Handoff Note
 
 ## Current State
-- Alicanto GSD planning structure (.planning/) created.
-- Initial project definition, roadmap, state, constitution, and checklist established.
-- CaveMem database initialized with Compiz analysis observations (ID 1-6).
-- Source reference `/home/esfingex/Github/compiz-0.9.14.2` identified as historical baseline.
-- Modern C++ Wayland reference cloned to `/home/esfingex/Github/wayfire`.
+- **Wave 001 Completed (`wave_001_math_engine_analysis`)**:
+  - Technical analysis of Wobbly Windows completed in [docs/math_wobbly_analysis.md](file:///home/esfingex/workspace/compiz-gnome/docs/math_wobbly_analysis.md).
+  - Technical analysis of 3D Desktop Cube completed in [docs/math_cube_analysis.md](file:///home/esfingex/workspace/compiz-gnome/docs/math_cube_analysis.md).
+  - Technical analysis of Burn Effect completed in [docs/math_burn_analysis.md](file:///home/esfingex/workspace/compiz-gnome/docs/math_burn_analysis.md).
+  - Universal Engine architecture & IPC DMA-BUF protocol specified in [docs/universal_engine_architecture.md](file:///home/esfingex/workspace/compiz-gnome/docs/universal_engine_architecture.md).
+- Wave 001 committed to Git and logged into CaveMem.
 
 ## Next Steps
-- Analyze `wobbly` physics math in `/home/esfingex/Github/wayfire/plugins/wobbly/` and `/home/esfingex/Github/compiz-0.9.14.2/plugins/wobbly/`.
-- Begin Phase 1.1: Document classic Compiz plugin architecture in docs/compiz_architecture.md.
-- Formulate C++ / Vulkan vs GJS extension architecture comparison.
+- Start Wave 002: Implement C++20 / CMake Vulkan Engine skeleton under `src/core_cpp/` and GJS extension skeleton under `src/gnome_extension/`.
