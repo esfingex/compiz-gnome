@@ -1041,3 +1041,445 @@ layout(push_constant) uniform GridTransform {
     float translate_x, translate_y;
 } grid;
 ```
+# Análisis Matemático y Modernización: Plugin Water (Superficie de Agua & Ripple)
+
+## Fuentes de Referencia
+- `compiz-0.9.14.2/plugins/water/src/water.cpp`
+- `compiz-0.9.14.2/plugins/water/src/shaders.h`
+- `compiz-0.9.14.2/plugins/water/src/water.h`
+
+---
+
+## 1. Deconstrucción Matemática del Código Fuente Original (Compiz 0.9)
+
+El plugin `water` simula la propagación de ondas de agua en la superficie del escritorio usando la **Ecuación de Onda 2D Discretizada** por el Método de Diferencias Finitas (FDM), ejecutada mediante shaders de fragmentos con tres buffers intermitentes (Ping-Pong FBOs).
+
+### A. Ecuación Diferencial Continua de Onda 2D
+La física subyacente es la ecuación de onda en un medio bidimensional continuo:
+
+$$\frac{\partial^2 u}{\partial t^2} = c^2 \left( \frac{\partial^2 u}{\partial x^2} + \frac{\partial^2 u}{\partial y^2} \right) - \gamma \frac{\partial u}{\partial t}$$
+
+Donde:
+- $u(x,y,t)$ es la altura de la superficie en la posición $(x,y)$ y tiempo $t$.
+- $c$ es la velocidad de propagación de la onda.
+- $\gamma$ es el coeficiente de amortiguamiento (viscosidad del fluido).
+
+### B. Discretización Finitad en Malla 2D (Shader `update_water_vertices_fragment_shader`)
+En el fragment shader de Compiz, la aceleración Laplacian $\nabla^2 u$ se calcula usando un stencil de 5 puntos (vecinos ortogonales):
+
+$$\text{accel} = (u_{curr}(x, y-1) + u_{curr}(x, y+1) + u_{curr}(x-1, y) + u_{curr}(x+1, y)) - 4 \cdot u_{curr}(x, y)$$
+
+La integración temporal de Verlet/Euler calcula la nueva altura $u_{next}(x,y)$ en el componente `alpha` (`v.w`):
+
+$$u_{next}(x, y) = \text{accel} \cdot (dt \cdot K) + 2 \cdot u_{curr}(x, y) - u_{prev}(x, y)$$
+
+$$u_{next}(x, y) \leftarrow u_{next}(x, y) \cdot \text{fade}$$
+
+Donde en el código fuente:
+- $K = 0.1964$ (constante de escala temporal de la onda).
+- $\text{fade} \in [0.90, 0.999]$ (factor de atenuación exponencial por frame para disipar la energía).
+
+### C. Generación Dinámica del Mapa de Normales (Normal Map Generator)
+Para calcular cómo la deformación del agua desvía la luz, los gradientes espaciales de altura se convierten en un vector normal 3D $\vec{N}$:
+
+$$N_x = u(x-1, y) - u(x+1, y)$$
+$$N_y = u(x, y+1) - u(x, y-1)$$
+$$N_z = 0.75$$
+
+El vector se normaliza y se empaqueta en el rango $[0, 1]$ para el formato de textura RGBA:
+
+$$\vec{N}_{packed} = 0.5 \cdot \text{normalize}(\vec{N}) + 0.5$$
+
+### D. Renderizado de Refracción y Mapeo Diffuso (`paint_water_vertices_fragment_shader`)
+En la etapa final de pintado sobre la pantalla compositada:
+
+1. **Offset de Refracción**:
+$$\Delta u = N_x \cdot u(x,y) \cdot \frac{\text{offsetScale}}{W}$$
+$$\Delta v = N_y \cdot u(x,y) \cdot \frac{\text{offsetScale}}{H}$$
+
+2. **Muestreo de la Textura Base con Desplazamiento**:
+$$C_{base} = \text{texture}(baseTex, \vec{uv} + \vec{offset})$$
+
+3. **Iluminación Especular / Difusa**:
+$$\text{diffFact} = \vec{N} \cdot \vec{L}$$
+$$C_{final} = C_{base} + \text{diffFact}$$
+
+---
+
+## 2. Ruta de Modernización para C++20 y Vulkan
+
+En Compiz 0.9, el algoritmo requería **3 Framebuffers OpenGL (Ping-Pong FBOs)** y 3 pases de fragment shader completos, lo que generaba un cuello de botella en el rasterizador de la GPU.
+
+### A. Sustitución del Rasterizador por Vulkan Compute Shaders (`VkComputePipeline`)
+En lugar de rasterizar cuadriláteros en un FBO, la simulación física completa se traslada a un **Compute Shader de Vulkan**:
+
+```
+[ Input Mouse / Rain Events ]
+              │
+              ▼
+[ Vulkan SSBO / Storage Image ]
+              │
+              ▼
+┌────────────────────────────────────────────────────────┐
+│  Vulkan Compute Shader (workgroup 16x16)               │
+│  - Carga stencil en Workgroup Shared Memory            │
+│  - Resuelve Ecuación de Onda 2D + Normal Map           │
+└────────────────────────────────────────────────────────┘
+              │
+              ▼
+[ Storage Image Result ] ──► [ Integrated into Main Composite Pipeline via DMA-BUF ]
+```
+
+### B. Optimización con Memoria Compartida (`workgroupMemory` / Local Data Store)
+En OpenGL clásico, cada píxel hacía 6 lecturas de textura separadas (`prevTex`, `currTex` en 4 direcciones). En Vulkan Compute Shader:
+- Se lee un bloque de $18 \times 18$ alturas a `shared float tile[18][18]`.
+- Se sincroniza con `barrier()`.
+- Todas las celdas internas de $16 \times 16$ calculan el laplaciano desde `shared memory` a velocidad de registro de GPU (0 accesos a VRAM adicional).
+
+### C. Mejoras Matemáticas y Ópticas Avanzadas
+
+1. **Refracción Física de Ley de Snell ($n_1 \sin \theta_1 = n_2 \sin \theta_2$)**:
+   Sustituir el desplazamiento lineal ad-hoc por el vector de refracción exacto:
+   $$\vec{R} = \frac{\eta_1}{\eta_2} \vec{I} + \left( \frac{\eta_1}{\eta_2} \cos\theta_1 - \sqrt{1 - \left(\frac{\eta_1}{\eta_2}\right)^2 (1 - \cos^2\theta_1)} \right) \vec{N}$$
+   Donde $\frac{\eta_1}{\eta_2} \approx 0.75$ (aire a agua).
+
+2. **Aberración Cromática (Dispersion Factor)**:
+   Muestrear los canales R, G y B con índices de refracción ligeramente distintos ($\eta_{red} = 0.750$, $\eta_{green} = 0.753$, $\eta_{blue} = 0.757$):
+   $$C_{red} = \text{texture}(baseTex, \vec{uv} + \vec{offset} \cdot 0.98).r$$
+   $$C_{green} = \text{texture}(baseTex, \vec{uv} + \vec{offset} \cdot 1.00).g$$
+   $$C_{blue} = \text{texture}(baseTex, \vec{uv} + \vec{offset} \cdot 1.02).b$$
+   Esto genera un destello de prisma muy realista en los bordes de la onda.
+
+3. **Ecuación de Reflexión de Fresnel (Fresnel Term Approximation)**:
+   $$F(\theta) = F_0 + (1 - F_0)(1 - \cos\theta)^5 \quad \text{con } F_0 = 0.02$$
+   Mezcla la textura invertida del fondo con la refracción en ángulos rasantes.
+
+---
+
+## 3. Integración en la Arquitectura C++20 / Extension GJS
+
+- **C++20 Engine**: Implementa `WaterComputePass` con `vkCmdDispatch(cmd, width/16, height/16, 1)`.
+- **GJS Extension**: Permite activar el efecto con gestos multi-touch o al mover ventanas rápidamente por el escritorio.
+- **Exportación**: Expone el mapa de normal/refracción o la imagen resultante como `VkImage` a través de `dma-buf` (`VK_KHR_external_memory_fd`).
+# Análisis Matemático y Modernización: Plugin Freewins (Transformaciones Libres 3D & Direct Input Raycasting)
+
+## Fuentes de Referencia
+- `compiz-0.9.14.2/plugins/freewins/src/freewins.cpp`
+- `compiz-0.9.14.2/plugins/freewins/src/freewins.h`
+
+---
+
+## 1. Deconstrucción Matemática del Código Fuente Original (Compiz 0.9)
+
+El plugin `freewins` permite la transformación tridimensional arbitraria de la textura de cualquier ventana (rotación en ejes X/Y/Z, escalado asimétrico y cizallamiento/skew), junto con la re-proyección de eventos de entrada.
+
+### A. Matriz de Transformación Homogénea 4x4
+La transformación completa de la ventana se representa mediante el producto acumulativo de matrices afines de 4 dimensiones:
+
+$$\mathbf{M}_{view} = \mathbf{T}(dx, dy, dz) \cdot \mathbf{R}_z(\gamma) \cdot \mathbf{R}_y(\beta) \cdot \mathbf{R}_x(\alpha) \cdot \mathbf{H}(h_x, h_y) \cdot \mathbf{S}(s_x, s_y, s_z)$$
+
+Donde:
+1. **Traslación**:
+   $$\mathbf{T}(dx, dy, dz) = \begin{pmatrix} 1 & 0 & 0 & dx \\ 0 & 1 & 0 & dy \\ 0 & 0 & 1 & dz \\ 0 & 0 & 0 & 1 \end{pmatrix}$$
+
+2. **Rotación Euler en 3 Ejes**:
+   $$\mathbf{R}_x(\alpha) = \begin{pmatrix} 1 & 0 & 0 & 0 \\ 0 & \cos\alpha & -\sin\alpha & 0 \\ 0 & \sin\alpha & \cos\alpha & 0 \\ 0 & 0 & 0 & 1 \end{pmatrix}, \quad \mathbf{R}_y(\beta) = \begin{pmatrix} \cos\beta & 0 & \sin\beta & 0 \\ 0 & 1 & 0 & 0 \\ -\sin\beta & 0 & \cos\beta & 0 \\ 0 & 0 & 0 & 1 \end{pmatrix}$$
+
+3. **Cizallamiento / Skew Matrix**:
+   $$\mathbf{H}(h_x, h_y) = \begin{pmatrix} 1 & \tan(h_x) & 0 & 0 \\ \tan(h_y) & 1 & 0 & 0 \\ 0 & 0 & 1 & 0 \\ 0 & 0 & 0 & 1 \end{pmatrix}$$
+
+4. **Escalado Asimétrico desde el Centro**:
+   $$\mathbf{S}(s_x, s_y, s_z) = \begin{pmatrix} s_x & 0 & 0 & 0 \\ 0 & s_y & 0 & 0 \\ 0 & 0 & s_z & 0 \\ 0 & 0 & 0 & 1 \end{pmatrix}$$
+
+### B. Inversión de Matriz para Redirección de Input en X11
+Para que una ventana inclinada o rotada responda al puntero del ratón en Compiz 0.9, el plugin calculaba la **Matriz Inversa** $\mathbf{M}^{-1}$:
+
+$$\mathbf{P}_{local} = \mathbf{M}^{-1} \cdot \mathbf{P}_{screen}$$
+
+Si $x_{local} \in [0, W_{win}]$ y $y_{local} \in [0, H_{win}]$, se sintetizaba un evento de entrada $XSendEvent$.
+
+---
+
+## 2. Ruta de Modernización para C++20 y Vulkan / Wayland
+
+En X11, la redirección de entrada en ventanas 3D era inestable debido al protocolo monolítico del X Server. En **Wayland (GNOME Shell / C++20 Engine)**, la arquitectura de entrada es limpia y basada en raycasting.
+
+### A. Raycasting de Intersección Ray-Plane en 3D
+Cuando el usuario interactúa con una ventana rotada en 3D en Wayland:
+
+1. **Unproject del Cursor desde Coordenadas NDC**:
+   Sea el cursor en pantalla $(x_{scr}, y_{scr})$, lo convertimos a Normalized Device Coordinates (NDC) $P_{ndc} \in [-1, 1]^3$:
+   $$\mathbf{P}_{near} = \mathbf{M}_{proj}^{-1} \cdot \mathbf{M}_{view}^{-1} \cdot \begin{pmatrix} x_{ndc} \\ y_{ndc} \\ -1 \\ 1 \end{pmatrix}$$
+   $$\mathbf{P}_{far} = \mathbf{M}_{proj}^{-1} \cdot \mathbf{M}_{view}^{-1} \cdot \begin{pmatrix} x_{ndc} \\ y_{ndc} \\ 1 \\ 1 \end{pmatrix}$$
+
+2. **Rayo 3D del Puntero**:
+   $$\mathbf{O}_{ray} = \mathbf{P}_{near}$$
+   $$\mathbf{D}_{ray} = \text{normalize}(\mathbf{P}_{far} - \mathbf{P}_{near})$$
+
+3. **Intersección Plano-Rayo con el Plano de la Ventana**:
+   Sea el plano de la ventana definido por su centro $\mathbf{P}_0$ y su vector normal transformado $\vec{N}_{win} = \mathbf{M}_{rot} \cdot (0, 0, 1)^T$:
+   $$t = \frac{(\mathbf{P}_0 - \mathbf{O}_{ray}) \cdot \vec{N}_{win}}{\mathbf{D}_{ray} \cdot \vec{N}_{win}}$$
+   $$\mathbf{P}_{hit} = \mathbf{O}_{ray} + t \cdot \mathbf{D}_{ray}$$
+
+4. **Transformación a Coordenadas Superficie Wayland**:
+   $$\begin{pmatrix} u \\ v \end{pmatrix} = \mathbf{M}_{local\_2d}^{-1} \cdot \mathbf{P}_{hit}$$
+   Se transmite el evento $wl\_pointer.motion(u, v)$ directamente al cliente Wayland de la aplicación sin latencia.
+
+### B. Rendimiento Vulkan (`Push Constants` + GLM Matrix Math)
+- En C++20, se utiliza `glm::mat4` pre-calculada en CPU.
+- La matriz final $MVP = \mathbf{P} \cdot \mathbf{V} \cdot \mathbf{M}$ se pasa al Vertex Shader de Vulkan mediante **Push Constants** (16 floats, 64 bytes), evitando asignaciones de memoria secundaria en GPU.
+
+---
+
+## 3. Registro en CaveMem y Verificación
+
+- Se añade el patrón de Raycasting Inverso Wayland a la memoria de arquitectura de `compiz-gnome`.
+# Análisis Matemático y Modernización: Plugin Ring (Carrusel Circular / Elíptico 3D)
+
+## Fuentes de Referencia
+- `compiz-0.9.14.2/plugins/ring/src/ring.cpp`
+- `compiz-0.9.14.2/plugins/ring/src/ring.h`
+
+---
+
+## 1. Deconstrucción Matemática del Código Fuente Original (Compiz 0.9)
+
+El plugin `ring` distribuye las miniaturas de las ventanas abiertas en una trayectoria elíptica o circular 3D alrededor del centro de la pantalla.
+
+### A. Ecuaciones Paramétricas de la Elipse de Navegación
+Dada una lista de $N$ ventanas, el índice de ventana $i \in [0, N-1]$ se mapea a un ángulo $\theta_i$:
+
+$$\theta_i = \theta_{base} - i \cdot \left( \frac{2\pi}{N} \right)$$
+
+Donde $\theta_{base} = \frac{2\pi \cdot \text{mRotTarget}}{3600}$ representa el ángulo de rotación global del carrusel.
+
+Las coordenadas de la pantalla $(x_i, y_i)$ de la ventana $i$ se obtienen mediante la parametrización de la elipse:
+
+$$x_i = C_x \pm A \cdot \sin(\theta_i)$$
+$$y_i = C_y + B \cdot \cos(\theta_i)$$
+
+Donde:
+- $(C_x, C_y) = \left( \frac{W_{screen}}{2}, \frac{H_{screen}}{2} \right)$ es el centro de la pantalla.
+- $A = \frac{W_{screen} \cdot \text{RingWidth}}{200}$ es el semieje mayor horizontal.
+- $B = \frac{H_{screen} \cdot \text{RingHeight}}{200}$ es el semieje menor vertical.
+
+### B. Interpolación Lineal de Profundidad ($s_{depth}$ y $b_{depth}$)
+En Compiz 0.9 (2D compositing), la ilusión de profundidad 3D se lograba interpolando linealmente la escala y el brillo en función de la coordenada $y_i$ (las ventanas con mayor $y$ están más cerca de la pantalla):
+
+$$s_{depth}(y_i) = \text{minScale} + \left( \frac{1.0 - \text{minScale}}{(C_y + B) - (C_y - B)} \right) \cdot (y_i - (C_y - B))$$
+
+$$b_{depth}(y_i) = \text{minBrightness} + \left( \frac{1.0 - \text{minBrightness}}{(C_y + B) - (C_y - B)} \right) \cdot (y_i - (C_y - B))$$
+
+El tamaño final de la miniatura $s_{total}$ combina el escalado para ajustar al bounding box con la profundidad:
+
+$$s_{fit} = \min\left( \frac{\text{thumbWidth}}{W_{win}}, \frac{\text{thumbHeight}}{H_{win}}, 1.0 \right)$$
+$$s_{total} = s_{fit} \cdot s_{depth}(y_i)$$
+
+### C. Ordenamiento de Dibujo (Painter's Algorithm)
+Para evitar fallos de superposición sin Z-buffer de profundidad, las ventanas se ordenan por su posición $y$:
+
+$$\text{compareRingWindowDepth}(a, b): a.y < b.y \implies a \text{ se dibuja primero (atrás)}$$
+
+---
+
+## 2. Ruta de Modernización para C++20 y Vulkan
+
+En el motor `compiz-gnome` C++20/Vulkan:
+
+### A. Espacio 3D Real con Cámara de Perspectiva (True 3D Orbit)
+Sustituimos el escalado 2D simulado por un verdadero **anillo 3D en el plano XZ**:
+
+$$\mathbf{P}_i = \begin{pmatrix} A \cdot \sin(\theta_i) \\ 0 \\ B \cdot \cos(\theta_i) \end{pmatrix}$$
+
+Matriz de Transformación por Ventana:
+$$\mathbf{M}_i = \mathbf{T}(\mathbf{P}_i) \cdot \mathbf{R}_y(-\theta_i) \cdot \mathbf{S}(s_{fit})$$
+
+La matriz de proyección en perspectiva $\mathbf{P}_{cam} \cdot \mathbf{V}_{cam}$ aplica automáticamente el acortamiento de perspectiva ($1/z$), el ordenamiento de profundidad por **Hardware Z-Buffer** (`VkPipelineDepthStencilStateCreateInfo`), y la atenuación de luz focal.
+
+### B. Inercia y Suavizado Amortiguado (Spring-Damper Dynamics)
+En C++20, la rotación de rueda/teclado utiliza integración numérica RK4 o Spring-Damper amortiguado crítico:
+
+$$a(t) = -k (\theta - \theta_{target}) - c \cdot v(t)$$
+$$v(t + \Delta t) = v(t) + a(t) \Delta t$$
+$$\theta(t + \Delta t) = \theta(t) + v(t + \Delta t) \Delta t$$
+
+---
+
+## 3. Registro en CaveMem
+
+- Registrada la modernización de Ring Switcher a 3D real XZ orbit con Vulkan Depth Buffer.
+# Análisis Matemático y Modernización: Plugin Shift (Cover Flow & Flip Switcher con Reflexión Planar)
+
+## Fuentes de Referencia
+- `compiz-0.9.14.2/plugins/shift/src/shift.cpp`
+- `compiz-0.9.14.2/plugins/shift/src/shift.h`
+
+---
+
+## 1. Deconstrucción Matemática del Código Fuente Original (Compiz 0.9)
+
+El plugin `shift` implementa dos modos de navegación 3D de ventanas: **ModeCover** (estilo Apple Cover Flow) y **ModeFlip** (estilo apilamiento lineal en ángulo), ambos con soporte de **Reflexión Planar en el Suelo**.
+
+---
+
+### A. Modo Cover Flow (`layoutThumbsCover`)
+
+Para cada ventana $i$ con distancia flotante al foco $d = \text{mMvTarget} - i$:
+
+#### 1. Zona Central ($|d| < 1.0$)
+La ventana transiciona suavemente hacia o desde el centro del escenario usando una proyección sinusoidal de $90^\circ$:
+
+$$\text{pos} = \sin\left(d \cdot \frac{\pi}{2}\right)$$
+$$x(d) = C_x + \text{pos} \cdot \text{space} \cdot \text{extraSpace}$$
+$$z(d) = -|d| \cdot \frac{\text{maxThumbWidth}}{2 \cdot W_{screen}}$$
+$$\theta_{rot}(d) = -\text{pos} \cdot \theta_{cover}$$
+
+Donde $\theta_{cover} \approx 65^\circ$ es el ángulo de inclinación lateral del abanico.
+
+#### 2. Zona Lateral ($|d| \ge 1.0$)
+Las ventanas laterales se disponen en un arco logarítmico con ángulo decreciente para evitar solapamientos excesivos:
+
+$$\text{ang}(d) = \left(\frac{\pi}{\max(72, 2N)}\right) \cdot (d - \text{pos}) + \text{pos} \cdot \left(\frac{\pi}{6}\right)$$
+$$x(d) = C_x + \sin(\text{ang}) \cdot \text{rad} \cdot W_{screen} \cdot \text{extraSpace}$$
+$$\theta_{rot}(d) = -\text{pos} \cdot \left( \theta_{cover} + 30^\circ - |\text{ang}| \cdot \frac{180^\circ}{\pi} \right)$$
+$$z(d) = -\left(\frac{\text{maxThumbWidth}}{2 W_{screen}}\right) - \cos\left(\frac{\pi}{6}\right) \cdot \text{rad} + \cos(\text{ang}) \cdot \text{rad}$$
+
+---
+
+### B. Modo Flip (`layoutThumbsFlip`)
+
+Las ventanas forman una fila en diagonal inclinada con ángulo constante $\phi_{flip}$:
+
+$$x(d) = C_x + \sin(\phi_{flip}) \cdot d \cdot \left(\frac{\text{maxThumbWidth}}{2}\right)$$
+$$z(d) = \cos(\phi_{flip}) \cdot d \cdot \left(\frac{\text{maxThumbWidth}}{2 W_{screen}}\right)$$
+$$\text{opacity}(d) = \max(0.0, 1.0 - d)$$
+
+---
+
+### C. Reflexión Planar sobre el Suelo (Floor Mirroring)
+En Compiz 0.9, el reflejo en el suelo se lograba dibujando la ventana dos veces: la segunda vez con escalado vertical invertido $S_y = -1$:
+
+$$\mathbf{M}_{reflect} = \mathbf{T}(x, y_{floor}, z) \cdot \mathbf{S}(s_x, -s_y, 1) \cdot \mathbf{R}_y(\theta)$$
+$$\alpha_{reflect} = \alpha_{win} \cdot \text{reflectBrightness}$$
+
+---
+
+## 2. Ruta de Modernización para C++20 y Vulkan
+
+En `compiz-gnome` C++20/Vulkan:
+
+### A. Matriz de Reflexión Planar Homogénea 4x4 Exacta
+Sustituimos la inversión ad-hoc $S_y = -1$ por la matriz de reflexión planar formal contra el plano del suelo $\Pi = (0, 1, 0, -y_{floor})^T$:
+
+$$\mathbf{R}_{plane} = \mathbf{I} - 2 \mathbf{N} \mathbf{N}^T = \begin{pmatrix} 1 & 0 & 0 & 0 \\ 0 & -1 & 0 & 2 y_{floor} \\ 0 & 0 & 1 & 0 \\ 0 & 0 & 0 & 1 \end{pmatrix}$$
+
+Matriz final del reflejo:
+$$\mathbf{M}_{reflect} = \mathbf{R}_{plane} \cdot \mathbf{M}_{window}$$
+
+### B. Desenfoque de Suelo Glossy / Matte con Vulkan Compute Shader
+En lugar de un reflejo de espejo perfecto y plano:
+1. Se renderiza la reflexión en una textura temporal.
+2. Un **Compute Shader de Desenfoque Gaussiano 1D** aplica un blur dependiente de la distancia vertical al suelo:
+   $$\sigma(y) = \sigma_{base} + k \cdot (y_{floor} - y)$$
+3. El resultado genera un suelo de mármol/cristal esmerilado (*glossy floor*) de calidad cinematográfica.
+
+---
+
+## 3. Registro en CaveMem
+
+- Registrada la matriz de reflexión planar $\mathbf{R}_{plane}$ y el blur de suelo Glossy con Compute Shader en CaveMem.
+# Análisis Matemático y Modernización: Suite Completa de Animaciones (Magic Lamp, Curl, Explode, etc.)
+
+## Fuentes de Referencia
+- `compiz-0.9.14.2/plugins/animation/src/magiclamp.cpp`
+- `compiz-0.9.14.2/plugins/animation/src/curvedfold.cpp`
+- `compiz-0.9.14.2/plugins/animation/src/dodge.cpp`
+- `compiz-0.9.14.2/plugins/animation/src/glide.cpp`
+
+---
+
+## 1. Deconstrucción Matemática de los Sub-Efectos de Animación
+
+El plugin `animation` es el más extenso de Compiz. Deforma la malla 2D/3D de los vértices de la ventana durante las transiciones de apertura (`map`), cierre (`unmap`), minimizado y restaurado.
+
+---
+
+### A. Magic Lamp (Efecto Lámpara Mágica / Genie)
+
+#### 1. Curva Sigmoide de Deformación de Malla
+Para estirar la ventana hacia la posición del icono en el dock $(x_{icon}, y_{icon})$, se calcula una interpolación no lineal basada en la función sigmoide:
+
+$$S(f_x) = \frac{1}{1 + e^{-k (f_x - 0.5)}}$$
+
+$$f_y = \frac{S(f_x) - S(0)}{S(1) - S(0)}$$
+
+Donde $f_x \in [0, 1]$ es la posición vertical normalizada en el grid de la ventana.
+
+La posición X interpolada de los vértices de la malla en cada nivel Y:
+$$x_{target} = f_y \cdot (x_{orig} - x_{icon}) + x_{icon}$$
+
+#### 2. Modulación de Ondas en Magic Lamp Wavy
+Para el efecto de agua/ola de la lámpara, se agregan perturbaciones cosenoidales a lo largo de la malla:
+
+$$\Delta x = \sum_{w=1}^{N_{waves}} \frac{A_w \cdot s_x}{2} \left[ \cos\left( \pi \cdot \frac{f_x - pos_w}{halfWidth_w} \right) + 1 \right]$$
+
+$$x_{target} \leftarrow x_{target} + \Delta x$$
+
+---
+
+### B. Curl / Curved Fold (Doblado de Página)
+
+Simula la física de una página de libro doblándose al cerrarse usando **Curvas de Bézier Cúbicas 3D**:
+
+$$\mathbf{B}(t) = (1-t)^3 \mathbf{P}_0 + 3(1-t)^2 t \mathbf{P}_1 + 3(1-t) t^2 \mathbf{P}_2 + t^3 \mathbf{P}_3, \quad t \in [0, 1]$$
+
+Donde los puntos de control $\mathbf{P}_1$ y $\mathbf{P}_2$ se desplazan en el eje Z para formar la parábola del pliegue.
+
+---
+
+### C. Explode / Triangulación de Desintegración
+
+La ventana se tesela en una malla de $N \times M$ polígonos/triángulos. Cada fragmento $k$ recibe:
+- Vector de velocidad lineal inicial $\vec{v}_k = (\text{rand}_x, \text{rand}_y, \text{rand}_z)$.
+- Vector de velocidad angular $\vec{\omega}_k$.
+
+Posición del polígono $k$ en el tiempo $t$:
+$$\mathbf{P}_k(t) = \mathbf{P}_{k,0} + \vec{v}_k \cdot t + \frac{1}{2} \vec{g} t^2$$
+$$\mathbf{R}_k(t) = \mathbf{R}_{k,0} + \vec{\omega}_k \cdot t$$
+
+---
+
+### D. Roll Up (Enrollado Cilíndrico)
+
+Enrolla la superficie de la ventana en un cilindro de radio $R(t) = R_{start} \cdot (1 - t)$:
+
+$$y_{cyl} = y_{bottom} - R \cdot \sin\left(\frac{y_{orig} - y_{bottom}}{R}\right)$$
+$$z_{cyl} = R \cdot \left(1 - \cos\left(\frac{y_{orig} - y_{bottom}}{R}\right)\right)$$
+
+---
+
+### E. Dodge (Esquive Dinámico de Foco)
+
+Las ventanas de fondo se apartan automáticamente del área de la ventana enfocada usando un campo de repulsión inversamente proporcional al cuadrado de la distancia:
+
+$$\vec{F}_{repulsion} = \sum_{j} \frac{k_{dodge}}{\|\mathbf{P}_{win} - \mathbf{P}_j\|^2} \hat{\mathbf{r}}_{j}$$
+
+---
+
+## 2. Ruta de Modernización para C++20 y Vulkan
+
+En Compiz 0.9, estas animaciones requerían teselar la malla en CPU y enviar miles de vértices por frame a la GPU vía VBO dinámicos.
+
+### A. Tessellation Shaders & Vertex Displacement Shaders en Vulkan
+- **Vulkan Tessellation Evaluation Shader (`VkPipelineTessellationStateCreateInfo`)**: La ventana se envía como un único quad simple de 4 vértices.
+- El **Tessellation Control Shader** subdivide la superficie dinámicamente según la cercanía a la cámara o el nivel de curvatura requerido.
+- El **Tessellation Evaluation Shader** evalúa las ecuaciones de Magic Lamp, Curl o Roll Up directamente en paralelo dentro de la GPU.
+
+### B. Geometry / Mesh Shaders para Explode
+- En Vulkan 1.3, un **Mesh Shader (`VkPipelineShaderStageCreateInfo`)** descompone el quad en fragmentos de malla independientes y calcula la física de proyectil $\vec{v}_k t + \frac{1}{2} \vec{g} t^2$ a 120 FPS sin tocar la memoria de la CPU.
+
+---
+
+## 3. Registro en CaveMem
+
+- Registrado el pipeline de Vulkan Tessellation & Mesh Shaders para la suite de animaciones en CaveMem.
