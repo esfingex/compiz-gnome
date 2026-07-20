@@ -142,6 +142,65 @@ struct FrameMessage {
    - El motor C++20/Vulkan no depende de Gnome, KDE ni X11; puede ejecutarse en Ubuntu, Arch, Fedora, Debian o CachyOS.
 3. **Integración No Invasiva**:
    - Si se deshabilita la extensión de GNOME Shell, el escritorio regresa a su estado normal instantáneamente sin necesidad de reiniciar la sesión de usuario.
+# Análisis Comparativo: Los 50 Plugins de Infraestructura de Compiz vs. GNOME Shell / Wayland
+
+## 1. El Dilema de Infraestructura: Compiz X11 vs. GNOME Shell Moderno
+
+Compiz (2006-2012) incluía unos ~50 plugins dedicados a la infraestructura de ventanas en X11 (`winrules`, `place`, `put`, `snap`, `decor`, `dbus`, `regex`, `annotate`, `showmouse`, `group`, `shelf`, etc.). 
+
+Existe la duda común de si GNOME Shell moderno en Wayland reemplaza completamente estos plugins o si su implementación es superior o inferior a la de Compiz.
+
+---
+
+## 2. Comparativa Detallada por Categoría
+
+### A. Reglas de Ventana y Posicionamiento (`winrules`, `regex`, `place`, `put`)
+- **Compiz (2007)**: Sistema potente basado en expresiones regulares (regex) sobre título, clase X11, rol o tipo de ventana. Permitía fijar posición exacta por píxel, workspace asignado, opacidad inicial, estado de la ventana (siempre visible, al fondo, sin bordes) y pantalla de salida.
+- **GNOME Shell (Moderno)**: Es extremadamente opinado y básico. Sutter/Mutter ubica las ventanas de forma centrada o recordada de forma muy limitada. **No existe motor de reglas regex nativo en GNOME Shell**.
+- **Veredicto**: **Compiz era inmensamente superior**. Hoy en día los usuarios de GNOME deben instalar extensiones de terceros (como *Auto Move Windows* o *Window Rules*) que son fragmentadas.
+- **Oportunidad de Extensión en `compiz-gnome`**: Crear un módulo GJS `CompizWindowRules` que lea expresiones regulares y aplique estados mediante la API de Mutter/Clutter.
+
+### B. Snapping y Tiling de Ventanas (`snap`, `grid`, `maximumize`)
+- **Compiz (2007)**: Atracción magnética por bordes de ventanas adyacentes (`snap`), cuadrículas del teclado numérico (`grid`) y algoritmo de expansión de área máxima libre (`maximumize`).
+- **GNOME Shell (Moderno)**: Incluye snapping básico a la mitad izquierda/derecha.
+- **Veredicto**: **Compiz tenía características únicas** como `maximumize` (expandir ventana hasta tocar las vecinas sin cubrir ninguna) que GNOME no tiene nativamente.
+- **Oportunidad de Extensión**: Implementar el algoritmo sweep-line de `maximumize` en GJS.
+
+### C. Personalización Visual y Decoraciones (`decor` / Emerald)
+- **Compiz (2007)**: Decorador externo desacoplado (`gtk-window-decorator` / `emerald`) que permitía bordes de cristal transparente, botones personalizados, sombras dinámicas y esquemas de color independientes de la app.
+- **GNOME Shell (Moderno)**: Usa Client-Side Decorations (CSD) con GTK4/Libadwaita o Server-Side Decorations (SSD) cerradas en Mutter. La personalización de bordes está fuertemente restringida por diseño.
+- **Veredicto**: **Compiz Emerald era inalcanzable en personalización visual**.
+- **Oportunidad de Extensión**: En nuestro motor Vulkan, la capa de sombras y bordes brillantes/animados se puede inyectar sobre el contenedor del actor de ventana en Clutter.
+
+### D. Herramientas Interactivas de Pantalla (`annotate`, `showmouse`, `group`, `shelf`)
+- **Compiz (2007)**:
+  - `annotate`: Dibujar libremente en pantalla sobre cualquier ventana con atajo de teclado + ratón.
+  - `showmouse`: Destello / rastro de partículas o anillos al presionar una tecla para localizar el cursor.
+  - `group`: Agrupar cualquier conjunto de ventanas en un contenedor con pestañas superiores.
+  - `shelf`: Minimizar ventanas como "estantes" flotantes escalados en cualquier esquina del escritorio.
+- **GNOME Shell (Moderno)**: **Ninguna de estas características existe en GNOME Shell por defecto.**
+- **Veredicto**: **Compiz ofrecía utilidades de productividad adelantadas a su tiempo.**
+- **Oportunidad de Extensión**: Implementar `CompizAnnotate` (dibujo en superficie Vulkan/Clutter) y `CompizGroup` (módulos GJS con gran valor de uso).
+
+---
+
+## 3. Resumen del Gap y Hoja de Ruta para Extensiones GJS
+
+| Plugin de Compiz | Disponible en GNOME Shell Nativo? | Superior / Inferior | Mapeo como Extensión `compiz-gnome` |
+| :--- | :--- | :--- | :--- |
+| `winrules` / `regex` | ❌ No | Compiz superior | Extensión GJS de Reglas Regex |
+| `maximumize` | ❌ No | Compiz superior | Módulo GJS Sweep-Line |
+| `annotate` | ❌ No | Compiz superior | Overlay Shader en Vulkan/GJS |
+| `showmouse` | ❌ No (solo accesibilidad básica) | Compiz superior | Shader de partículas alrededor de cursor |
+| `group` (Pestañas) | ❌ No | Compiz superior | Decorador GJS de Pestañas |
+| `shelf` | ❌ No | Compiz superior | Extensión de Thumbnails flotantes |
+| `emerald` (Decorador) | ❌ Restringido por Adwaita | Compiz superior | Inyección de Bordes/Shaders en Clutter |
+
+---
+
+## 4. Conclusión
+
+Los 50 plugins de infraestructura de Compiz **no han sido superados por GNOME Shell**; al contrario, la simplicidad de GNOME dejó vacíos que hoy se pueden llenar convirtiendo esos antiguos plugins en **extensiones GJS modulares y elegantes** impulsadas por nuestro motor C++20/Vulkan.
 # Análisis Matemático y Modelo Físico: Wobbly Windows (Ventanas Gelatinosas)
 
 ## 1. Fundamentos Físicos
@@ -1483,3 +1542,80 @@ En Compiz 0.9, estas animaciones requerían teselar la malla en CPU y enviar mil
 ## 3. Registro en CaveMem
 
 - Registrado el pipeline de Vulkan Tessellation & Mesh Shaders para la suite de animaciones en CaveMem.
+# Análisis Matemático y Modernización: Los 7 Efectos Visuales Secundarios de Compiz
+
+## Fuentes de Referencia
+- `compiz-0.9.14.2/plugins/firepaint/src/firepaint.cpp`
+- `compiz-0.9.14.2/plugins/cubeaddon/src/cubeaddon.cpp`
+- `compiz-0.9.14.2/plugins/mblur/src/mblur.cpp`
+- `compiz-0.9.14.2/plugins/reflex/src/reflex.cpp`
+- `compiz-0.9.14.2/plugins/colorfilter/src/colorfilter.cpp`
+
+---
+
+## 1. Firepaint (Pintado Interactivo de Fuego)
+
+### A. Física de Partículas Emitidas por Cursor
+Cuando el usuario arrastra el cursor $(x, y)$, emite partículas en una cola de emisión. Para cada partícula $p$:
+
+$$x(t+\Delta t) = x(t) + \frac{v_x}{slowdown}, \quad y(t+\Delta t) = y(t) + \frac{v_y}{slowdown}$$
+$$v_x(t+\Delta t) = v_x(t) + a_x \cdot dt, \quad v_y(t+\Delta t) = v_y(t) + a_y \cdot dt$$
+
+Donde la aceleración ascendente $a_y = -3.0$ (convección térmica de llama) y la vida $life(t) \leftarrow life(t) - fade \cdot dt$.
+
+### B. Modernización Vulkan: Particle Compute Shader
+- En Vulkan C++20, en vez de almacenar arreglos en CPU y mapear `GLVertexBuffer`, se usa un **Vulkan Storage Buffer (SSBO)** de $N=100,000$ partículas actualizadas por un `VkComputePipeline` de 1 pase y renderizadas con `vkCmdDrawIndirect`.
+
+---
+
+## 2. Motion Blur (`mblur` - Desenfoque de Movimiento Acumulativo)
+
+### A. Integración Temporal Exponencial (Accumulation Buffer)
+`mblur` genera un rastro de movimiento reteniendo los frames anteriores en una textura de acumulación:
+
+$$F_{accum}(t) = \alpha \cdot F_{curr}(t) + (1 - \alpha) \cdot F_{accum}(t - \Delta t)$$
+
+Donde $\alpha \in (0, 1]$ es el factor de persistencia.
+
+### B. Modernización Vulkan
+- En Vulkan C++20, se utiliza un `VkImage` intermedio de alta precisión (`VK_FORMAT_R16G16B16A16_SFLOAT`) mezclado dinámicamente durante el pase de composición.
+
+---
+
+## 3. CubeAddon (Cubo Esférico, Reflejo en Suelo y Cap Images)
+
+### A. Morphing Geométrico Cubo $\to$ Esfera
+El plugin intercala linealmente entre la superficie del cubo 3D y la esfera parametrizada:
+
+$$\mathbf{P}_{sphere} = R \cdot \text{normalize}(\mathbf{P}_{cube})$$
+$$\mathbf{P}_{final}(t) = (1 - \lambda) \cdot \mathbf{P}_{cube} + \lambda \cdot \mathbf{P}_{sphere}, \quad \lambda \in [0, 1]$$
+
+### B. Reflexiones de Cielo/Suelo (Skybox & Ground Reflection)
+Renderiza el reflejo sobre el plano $Y=0$ con atenuación de Fresnel $F(\theta)$ y textura de cielo desvanecida en el horizonte.
+
+---
+
+## 4. 3D Windows (`td` - Ventanas con Inclinación Depth-of-Field)
+
+Aplica una transformación de rotación 3D inclinada $\mathbf{R}_x(\theta)$ a las ventanas no enfocadas y un desenfoque Gaussiano proporcional a la distancia $Z$ a la cámara:
+
+$$\text{blur\_radius}(z) = k \cdot |z - z_{focus}|$$
+
+---
+
+## 5. Filtros de Color (`obs`, `colorfilter`, `neg`)
+
+Transformaciones matriciales $4 \times 4$ en espacio de color aplicadas en el Fragment Shader:
+
+$$\begin{pmatrix} R' \\ G' \\ B' \\ A' \end{pmatrix} = \mathbf{M}_{color} \cdot \begin{pmatrix} R \\ G \\ B \\ A \end{pmatrix}$$
+
+- **Inversión (Negativo)**: $\mathbf{M}_{neg} = \begin{pmatrix} -1 & 0 & 0 & 1 \\ 0 & -1 & 0 & 1 \\ 0 & 0 & -1 & 1 \\ 0 & 0 & 0 & 1 \end{pmatrix}$
+- **Daltonismo (Deuteranopia/Protanopia)**: Multiplicación por la matriz de corrección LMS de LMS-to-RGB.
+
+---
+
+## 6. Reflexión Especular (`reflex`)
+
+Aplica una textura de mapa de reflejo espejado $\mathbf{T}_{reflex}(u, v)$ con degradado alpha en el borde superior o inferior de las ventanas:
+
+$$C_{out} = C_{win} + \alpha_{reflex}(v) \cdot C_{gloss}$$
