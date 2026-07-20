@@ -151,28 +151,52 @@ Para evitar **tearing, frame corruption o deadlocks** entre el motor Vulkan y Mu
    - Motor C++ espera `release_sync_fd` antes de reutilizar el buffer.
 3. **Triple Buffering**: El pool de imágenes Vulkan mantiene $N=3$ buffers por ventana para no bloquear la cola de presentación.
 
-### B. DRM Format Modifiers (`VK_IMAGE_TILING_DRM_FORMAT_MODIFIER_EXT`)
-- Para escaneo directo en hardware disimilitud (NVIDIA, AMD, Intel), el motor negocia `VkDrmFormatModifierPropertiesListEXT` al crear la `VkImage`.
-- Previene blits costosos en CPU/GPU durante screencasts con PipeWire o direct scanout.
+### B. DRM Format Modifiers Handshake (`VK_IMAGE_TILING_DRM_FORMAT_MODIFIER_EXT`)
+- Para escaneo directo en hardware disimilitud (NVIDIA, AMD, Intel, llvmpipe):
+  1. Motor C++ consulta `VkDrmFormatModifierPropertiesListEXT`.
+  2. IPC Handshake transmite la lista de modifiers soportados a GJS.
+  3. GJS/Mutter negocia la intersección vía `gbm_bo_create_with_modifiers` y crea la `VkImage` con `VkImageDrmFormatModifierExplicitCreateInfoEXT`.
 
-### C. Arquitectura Effect Graph (Render Graph en C++20)
-El motor organiza los pases de renderizado mediante un **Render Graph** declarativo:
-```cpp
-template <typename T>
-concept EffectNode = requires(T& node, FrameGraph& fg, FrameData& fd, vk::raii::CommandBuffer& cmd) {
-    { node.setup(fg) } -> std::same_as<void>;
-    { node.execute(cmd, fd) } -> std::same_as<void>;
-};
-```
-- Deducción automática de barreras `VkImageMemoryBarrier2` en Vulkan 1.3.
-- Reutilización de memoria transitoria para sub-pases de física y sombras.
-
-### D. Descriptor Buffers (`VK_EXT_descriptor_buffer`)
-Sustitución completa de `vkUpdateDescriptorSets` por **Descriptor Buffers** de Vulkan 1.3, vinculando descriptores con offsets en Push Constants para costo cero de CPU por ventana.
+### C. Damage Region & Present Pass (`wl_surface.damage_buffer`)
+- **Simulación Full-Frame**: La física (Water, Wobbly, Burn) corre siempre sobre la textura completa (1920x1080) para condiciones de frontera válidas.
+- **Composición Parcial**: El `PresentPass` notifica a Mutter solo la región modificada (`damage_rect`), ahorrando un 90% de ancho de banda PCIe/VRAM durante la composición.
 
 ---
 
-## 4. Aliasing de Recursos GPU (Transient Memory Aliasing Map)
+## 4. Esquema Protobuf del Protocolo IPC (`water.proto`)
+
+```protobuf
+syntax = "proto3";
+package compiz.engine;
+
+message WaterImpact {
+  uint64 window_id = 1;
+  float  x = 2;
+  float  y = 3;
+  float  strength = 4;
+  float  radius = 5;
+  uint64 timestamp_ns = 6;
+}
+
+message SurfaceUpdate {
+  uint64 window_id = 1;
+  uint32 width = 2;
+  uint32 height = 3;
+  uint64 drm_modifier = 4;
+  uint32 timeline_value = 5;
+}
+
+message EngineCommand {
+  oneof payload {
+    WaterImpact water_impact = 1;
+    SurfaceUpdate surface_update = 2;
+  }
+}
+```
+
+---
+
+## 5. Aliasing de Recursos GPU (Transient Memory Aliasing Map)
 
 El Frame Graph agrupa los recursos cuya vida útil no se solapa dentro del mismo frame para compartir memoria `VkDeviceMemory` mediante VMA (Vulkan Memory Allocator):
 
@@ -186,7 +210,7 @@ El Frame Graph agrupa los recursos cuya vida útil no se solapa dentro del mismo
 
 ---
 
-## 5. Estructura de Módulos C++20 Definitiva
+## 6. Estructura de Módulos C++20 Definitiva
 
 ```cpp
 // engine.core.module.cpp
@@ -210,13 +234,16 @@ export import engine.effects.animation;  // AnimationMeshPass (Mesh Shaders 1.3)
 
 ---
 
-## 6. Estrategia de Implementación: Vertical Slice MVP (Water Ripple Drag)
+## 7. Estrategia de Implementación: Vertical Slice MVP (Water Ripple Drag)
 
-El plan de construcción del núcleo iniciará con el **Vertical Slice de Prueba**:
+Lista de comprobación de fontanería (Plumbing Checklist) para el primer prototipo funcional:
 
-1. **GJS Extension**: Intercepta `motion-notify-event` al arrastrar una ventana $\to$ envía `WaterImpact(x, y, strength)` por IPC.
-2. **C++20 Engine**: Instancia `WaterComputePass` dentro del `FrameGraph`. Ejecuta `water_sim.comp` a 120Hz fijos.
-3. **DMA-BUF Roundtrip**: Exporta `normal_map_fd` $\to$ Mutter aplica `water_effect.frag` sin copias RAM/VRAM.
+1. **Negociación de DRM Modifier**: Negociar modifier común entre C++ e IPC GJS.
+2. **Handshake Sync FD**: Sincronización explícita mediante `vkGetSemaphoreFdKHR` y `vkImportSemaphoreFdKHR`.
+3. **Importación de Textura DMA-BUF**: Carga de la superficie de ventana desde Mutter como `VkImage`.
+4. **Recursos Persistentes de Ventana**: `WindowResources` por `WindowID` en `FrameGraph`.
+5. **Hook de Entrada GJS**: Interceptación de `captured-event` al arrastrar ventana.
+6. **Bucle Fixed Timestep**: Acumulador a 120Hz desacoplado del VSync de presentación.
 # Análisis Comparativo: Los 50 Plugins de Infraestructura de Compiz vs. GNOME Shell / Wayland
 
 ## 1. El Dilema de Infraestructura: Compiz X11 vs. GNOME Shell Moderno
