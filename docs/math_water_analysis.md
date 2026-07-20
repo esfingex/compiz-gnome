@@ -32,89 +32,179 @@ $$u_{next}(x, y) = \text{accel} \cdot (dt \cdot K) + 2 \cdot u_{curr}(x, y) - u_
 
 $$u_{next}(x, y) \leftarrow u_{next}(x, y) \cdot \text{fade}$$
 
-Donde en el código fuente:
-- $K = 0.1964$ (constante de escala temporal de la onda).
-- $\text{fade} \in [0.90, 0.999]$ (factor de atenuación exponencial por frame para disipar la energía).
+---
 
-### C. Generación Dinámica del Mapa de Normales (Normal Map Generator)
-Para calcular cómo la deformación del agua desvía la luz, los gradientes espaciales de altura se convierten en un vector normal 3D $\vec{N}$:
+## 2. Refinamientos Físicos y Estabilidad Numérica AAA (Fixed Timestep & CFL Condition)
 
-$$N_x = u(x-1, y) - u(x+1, y)$$
-$$N_y = u(x, y+1) - u(x, y-1)$$
-$$N_z = 0.75$$
+### A. Desacoplamiento Temporal: Acumulador Fixed Timestep ($\Delta t_{physics} = \frac{1}{120}\text{s}$)
+En Compiz OpenGL, el escalado $dt \cdot K$ dependía del VSync. Si la tasa de refresco cambia (60Hz vs 144Hz) o sufre un drop a 30Hz, la simulación sufre **explosión numérica** o se congela.
 
-El vector se normaliza y se empaqueta en el rango $[0, 1]$ para el formato de textura RGBA:
+En `compiz-gnome` C++20, se desacopla la física mediante un **Acumulador de Pasos Fijos**:
 
-$$\vec{N}_{packed} = 0.5 \cdot \text{normalize}(\vec{N}) + 0.5$$
+```cpp
+class WaterSimulation {
+    static constexpr float PHYSICS_DT = 1.0f / 120.0f; // 120Hz interno fijo
+    float accumulator_ = 0.0f;
 
-### D. Renderizado de Refracción y Mapeo Diffuso (`paint_water_vertices_fragment_shader`)
-En la etapa final de pintado sobre la pantalla compositada:
+public:
+    void step(float frameDt) {
+        accumulator_ += frameDt;
+        while (accumulator_ >= PHYSICS_DT) {
+            dispatchCompute(PHYSICS_DT); // Push Constant dt = 1/120s
+            accumulator_ -= PHYSICS_DT;
+        }
+    }
+};
+```
 
-1. **Offset de Refracción**:
-$$\Delta u = N_x \cdot u(x,y) \cdot \frac{\text{offsetScale}}{W}$$
-$$\Delta v = N_y \cdot u(x,y) \cdot \frac{\text{offsetScale}}{H}$$
+### B. Condición de Estabilidad CFL (Courant-Friedrichs-Lewy)
+Para FDM explícito 2D con stencil de 5 puntos, el número de Courant debe cumplir:
 
-2. **Muestreo de la Textura Base con Desplazamiento**:
-$$C_{base} = \text{texture}(baseTex, \vec{uv} + \vec{offset})$$
+$$C = c \cdot \frac{\Delta t}{\Delta x} \le \frac{1}{\sqrt{2}} \approx 0.707$$
 
-3. **Iluminación Especular / Difusa**:
-$$\text{diffFact} = \vec{N} \cdot \vec{L}$$
-$$C_{final} = C_{base} + \text{diffFact}$$
+El motor C++ valida y limita automáticamente la velocidad $c$ antes de enviarla como Push Constant:
+
+$$c_{clamped} = \min\left(c_{user}, \; \frac{0.707}{\Delta t_{physics}}\right)$$
+
+### C. Optimización de Formatos de Memoria VRAM
+- **Heightmaps (Ping-Pong)**: `VK_FORMAT_R16_SFLOAT` (16-bit Float, ahorro de 2x ancho de banda VRAM respecto a R32).
+- **Normal Map Output**: `VK_FORMAT_R16G16B16A16_SFLOAT` (Normales $XYZ$ empacadas en $RGB$ + Altura $u_{next}$ empacada en $Alpha$).
 
 ---
 
-## 2. Ruta de Modernización para C++20 y Vulkan
+## 3. Kernel Vulkan Compute Shader Optimizado (`water_sim.comp`)
 
-En Compiz 0.9, el algoritmo requería **3 Framebuffers OpenGL (Ping-Pong FBOs)** y 3 pases de fragment shader completos, lo que generaba un cuello de botella en el rasterizador de la GPU.
+Con bloque local de $16 \times 16$ hilos y memoria compartida local $18 \times 18$ `f16` (648 Bytes en Local Data Store):
 
-### A. Sustitución del Rasterizador por Vulkan Compute Shaders (`VkComputePipeline`)
-En lugar de rasterizar cuadriláteros en un FBO, la simulación física completa se traslada a un **Compute Shader de Vulkan**:
+```glsl
+#version 460 core
+#extension GL_EXT_shader_explicit_arithmetic_types_f16 : require
 
+layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
+
+layout(set = 0, binding = 0) uniform sampler2D u_prevHeight;
+layout(set = 0, binding = 1) uniform image2D u_currHeight;
+layout(set = 0, binding = 2) uniform image2D u_nextHeight;
+layout(set = 0, binding = 3) uniform image2D u_normalMap;
+
+layout(push_constant) uniform PushConstants {
+    float dt;
+    float fade;
+    float waveSpeed;
+    float deltaScale;
+    uint  frameIndex;
+} pc;
+
+shared f16 tile[18][18]; // 648 Bytes LDS - Permite máximo occupancy por SM/Compute Unit
+
+void main() {
+    ivec2 globalId = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 localId  = ivec2(gl_LocalInvocationID.xy);
+    ivec2 dim      = imageSize(u_currHeight);
+    
+    if (globalId.x >= dim.x || globalId.y >= dim.y) return;
+
+    // 1. Carga cooperativa de halo 18x18 en Shared Memory
+    uint linearId = gl_LocalInvocationIndex;
+    for (uint i = linearId; i < 18 * 18; i += 256) {
+        int tx = int(i % 18);
+        int ty = int(i / 18);
+        ivec2 loadPos = clamp(globalId - ivec2(1, 1) + ivec2(tx, ty), ivec2(0), dim - 1);
+        tile[ty][tx] = f16(imageLoad(u_currHeight, loadPos).r);
+    }
+    
+    barrier();
+
+    int cx = localId.x + 1;
+    int cy = localId.y + 1;
+
+    float u_curr_c = f32(tile[cy][cx]);
+    float u_prev_c = imageLoad(u_prevHeight, globalId).r;
+
+    // 2. Laplaciano desde Shared Memory (0 lecturas VRAM adicionales)
+    float laplacian = f32(tile[cy-1][cx]) + f32(tile[cy+1][cx]) +
+                      f32(tile[cy][cx-1]) + f32(tile[cy][cx+1]) - 4.0 * u_curr_c;
+
+    // 3. Integración de Verlet
+    float c2_dt2 = pc.waveSpeed * pc.waveSpeed * pc.dt * pc.dt;
+    float u_next = (laplacian * c2_dt2 + 2.0 * u_curr_c - u_prev_c) * pc.fade;
+
+    imageStore(u_nextHeight, globalId, vec4(u_next, 0.0, 0.0, 0.0));
+
+    // 4. Derivadas centrales para Normal Map (con empacado en RGBA16F)
+    float dhdx = (f32(tile[cy][cx+1]) - f32(tile[cy][cx-1])) * 0.5 * pc.deltaScale;
+    float dhdy = (f32(tile[cy-1][cx]) - f32(tile[cy+1][cx])) * 0.5 * pc.deltaScale; 
+
+    vec3 N = normalize(vec3(-dhdx, -dhdy, 1.0));
+    imageStore(u_normalMap, globalId, vec4(N * 0.5 + 0.5, u_next));
+}
 ```
-[ Input Mouse / Rain Events ]
-              │
-              ▼
-[ Vulkan SSBO / Storage Image ]
-              │
-              ▼
-┌────────────────────────────────────────────────────────┐
-│  Vulkan Compute Shader (workgroup 16x16)               │
-│  - Carga stencil en Workgroup Shared Memory            │
-│  - Resuelve Ecuación de Onda 2D + Normal Map           │
-└────────────────────────────────────────────────────────┘
-              │
-              ▼
-[ Storage Image Result ] ──► [ Integrated into Main Composite Pipeline via DMA-BUF ]
-```
-
-### B. Optimización con Memoria Compartida (`workgroupMemory` / Local Data Store)
-En OpenGL clásico, cada píxel hacía 6 lecturas de textura separadas (`prevTex`, `currTex` en 4 direcciones). En Vulkan Compute Shader:
-- Se lee un bloque de $18 \times 18$ alturas a `shared float tile[18][18]`.
-- Se sincroniza con `barrier()`.
-- Todas las celdas internas de $16 \times 16$ calculan el laplaciano desde `shared memory` a velocidad de registro de GPU (0 accesos a VRAM adicional).
-
-### C. Mejoras Matemáticas y Ópticas Avanzadas
-
-1. **Refracción Física de Ley de Snell ($n_1 \sin \theta_1 = n_2 \sin \theta_2$)**:
-   Sustituir el desplazamiento lineal ad-hoc por el vector de refracción exacto:
-   $$\vec{R} = \frac{\eta_1}{\eta_2} \vec{I} + \left( \frac{\eta_1}{\eta_2} \cos\theta_1 - \sqrt{1 - \left(\frac{\eta_1}{\eta_2}\right)^2 (1 - \cos^2\theta_1)} \right) \vec{N}$$
-   Donde $\frac{\eta_1}{\eta_2} \approx 0.75$ (aire a agua).
-
-2. **Aberración Cromática (Dispersion Factor)**:
-   Muestrear los canales R, G y B con índices de refracción ligeramente distintos ($\eta_{red} = 0.750$, $\eta_{green} = 0.753$, $\eta_{blue} = 0.757$):
-   $$C_{red} = \text{texture}(baseTex, \vec{uv} + \vec{offset} \cdot 0.98).r$$
-   $$C_{green} = \text{texture}(baseTex, \vec{uv} + \vec{offset} \cdot 1.00).g$$
-   $$C_{blue} = \text{texture}(baseTex, \vec{uv} + \vec{offset} \cdot 1.02).b$$
-   Esto genera un destello de prisma muy realista en los bordes de la onda.
-
-3. **Ecuación de Reflexión de Fresnel (Fresnel Term Approximation)**:
-   $$F(\theta) = F_0 + (1 - F_0)(1 - \cos\theta)^5 \quad \text{con } F_0 = 0.02$$
-   Mezcla la textura invertida del fondo con la refracción en ángulos rasantes.
 
 ---
 
-## 3. Integración en la Arquitectura C++20 / Extension GJS
+## 4. Fragment Shader del Compositor Clutter/Mutter (`water_effect.frag`)
 
-- **C++20 Engine**: Implementa `WaterComputePass` con `vkCmdDispatch(cmd, width/16, height/16, 1)`.
-- **GJS Extension**: Permite activar el efecto con gestos multi-touch o al mover ventanas rápidamente por el escritorio.
-- **Exportación**: Expone el mapa de normal/refracción o la imagen resultante como `VkImage` a través de `dma-buf` (`VK_KHR_external_memory_fd`).
+Shader óptico ejecutado en el compositor con **Refracción de Snell + Aberración Cromática RGB + Reflexión de Fresnel**:
+
+```glsl
+#version 450 core
+layout(binding = 0) uniform sampler2D u_desktopTexture;
+layout(binding = 1) uniform sampler2D u_waterNormalMap;
+
+in vec2 v_texCoord;
+out vec4 fragColor;
+
+uniform float u_refractionStrength;
+
+void main() {
+    vec4 waterData = texture(u_waterNormalMap, v_texCoord);
+    vec3 N = waterData.rgb * 2.0 - 1.0;
+    float height = waterData.a;
+
+    // 1. Refracción de Snell (Aproximación de rayo)
+    vec2 offset = (N.xy / max(N.z, 0.001)) * height * u_refractionStrength;
+    vec2 texelSize = 1.0 / vec2(textureSize(u_desktopTexture, 0));
+
+    // 2. Aberración Cromática Dispersiva RGB
+    vec2 uv_r = v_texCoord + offset * 0.98 * texelSize;
+    vec2 uv_g = v_texCoord + offset * 1.00 * texelSize;
+    vec2 uv_b = v_texCoord + offset * 1.02 * texelSize;
+
+    vec3 color;
+    color.r = texture(u_desktopTexture, uv_r).r;
+    color.g = texture(u_desktopTexture, uv_g).g;
+    color.b = texture(u_desktopTexture, uv_b).b;
+
+    // 3. Reflectividad de Fresnel (Schlick)
+    float cosTheta = max(N.z, 0.0);
+    float F0 = 0.02; // Agua
+    float fresnel = F0 + (1.0 - F0) * pow(1.0 - cosTheta, 5.0);
+
+    vec3 skyColor = vec3(0.1, 0.2, 0.35);
+    color = mix(color, skyColor, fresnel * 0.4);
+
+    // 4. Brillo Especular (Glint)
+    float spec = pow(max(0.0, N.z), 200.0) * height * 2.0;
+    color += vec3(spec);
+
+    fragColor = vec4(color, 1.0);
+}
+```
+
+---
+
+## 5. Protocolo de Fences (Timeline Semaphores IPC Roundtrip)
+
+```
+C++ Vulkan Engine                       Kernel / SCM_RIGHTS                      Mutter / Clutter (Host)
+      │                                         │                                           │
+      ├──── Dispatch(WaterSim) ─────────────────┤                                           │
+      ├──── Signal(TimelineSem @ N) ────────────┤                                           │
+      ├──── Export Sync FD ────────────────────►│── Enviar {normal_fd, sync_fd, val=N} ─────►│
+      │                                         │                                           ├─ Import Sync FD (Wait)
+      │                                         │                                           ├─ Composite Water Pass
+      │                                         │                                           ├─ Signal Release Sync FD
+      │◄── Return Release Sync FD ──────────────┼◄── Enviar {release_fd, val=N} ─────────────┤
+      ├──── Wait(Release Sync FD) ──────────────┤                                           │
+      └──── Ready for Frame N+1 ────────────────┘                                           │
+```
