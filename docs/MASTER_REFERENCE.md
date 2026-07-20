@@ -495,7 +495,7 @@ En nuestro motor `compiz-gnome`:
 2. **Renderizado de Partículas con Mezcla Aditiva**:
    - `vkCmdDraw` instancia cada partícula como un Sprite / Quad orientado a la cámara.
    - El pipeline utiliza mezcla aditiva (`VK_BLEND_FACTOR_SRC_ALPHA`, `VK_BLEND_FACTOR_ONE`) para dar el brillo característico del fuego.
-# Análisis Matemático: Blur (Desenfoque Gausiano y Kawase)
+# Análisis Matemático y Modernización: Plugin Blur (Desenfoque Gaussiano LDS & Dual Kawase)
 
 ## Fuentes de Referencia
 - `wayfire/plugins/blur/gaussian.cpp`
@@ -504,74 +504,188 @@ En nuestro motor `compiz-gnome`:
 
 ---
 
-## 1. Fundamentos del Desenfoque
+## 1. Deconstrucción Matemática y Estrategia Dual AAA
 
-Un desenfoque de imagen consiste en reemplazar el valor de color de cada píxel $(x, y)$ por una media ponderada de sus vecinos. La diferencia entre algoritmos reside en la forma de esa función de ponderación y su eficiencia computacional.
+El desenfoque de fondo en tiempo real a 4K/144Hz requiere seleccionar la estrategia de filtrado óptima en función del radio deseado:
+
+| Radio de Blur ($r$) | Estrategia Vulkan | Complejidad | Justificación de Hardware |
+| :--- | :--- | :--- | :--- |
+| **Pequeño / Medio ($r < 15\text{px}$)** | **Gaussiano 2 pases con LDS Shared Memory** | $O(r)$ | Kernel de convolución en memoria compartida (8 KB LDS). |
+| **Grande ($r \ge 15\text{px}$)** | **Dual Kawase (Down Compute + Up Graphics)** | $O(1)$ | Cadena de downsampling / upsampling con consumo constante de VRAM. |
 
 ---
 
-## 2. Desenfoque Gaussiano de Dos Pasadas (Separable Gaussian Blur)
+## 2. Gaussiano Separable en Compute Shader (`blur_gaussian.comp`)
 
-### Principio de Separabilidad
-La función Gaussiana 2D es **separable**: se puede descomponer en dos convoluciones 1D independientes (horizontal y vertical), lo que reduce la complejidad de $O(n^2)$ a $O(2n)$ por píxel.
-
-$$G(x, y) = \frac{1}{2\pi\sigma^2} e^{-\frac{x^2 + y^2}{2\sigma^2}} = G_x(x) \cdot G_y(y)$$
-
-### Implementación en Wayfire (5-tap aproximación discreta)
-El shader de Wayfire implementa una aproximación eficiente de 5 muestras por pase con pesos pre-calculados que suman 1.0:
-
-**Kernel 1D de 5 muestras (Pesos)**:
-
-| Desplazamiento | Peso |
-| :--- | :--- |
-| $0$ (centro) | $0.204164$ |
-| $\pm 1.5$ píxeles | $0.304005$ |
-| $\pm 3.5$ píxeles | $0.093913$ |
-
-**Verificación**: $0.204164 + 2 \times 0.304005 + 2 \times 0.093913 = 1.000000$ ✓
+En Vulkan Compute Shader con `imageLoad`, no existe filtrado bilineal hardware "gratis" como en Fragment Shaders. Para maximizar el ancho de banda VRAM, se utiliza **Shared Memory (Local Data Store)** con halo de $r$ píxeles:
 
 ```glsl
-// Pase Horizontal (del shader de Wayfire):
-bp += texture2D(bg_texture, vec2(blurcoord[0].x, uv.y)) * 0.204164; // centro
-bp += texture2D(bg_texture, vec2(blurcoord[1].x, uv.y)) * 0.304005; // +1.5px
-bp += texture2D(bg_texture, vec2(blurcoord[2].x, uv.y)) * 0.304005; // -1.5px
-bp += texture2D(bg_texture, vec2(blurcoord[3].x, uv.y)) * 0.093913; // +3.5px
-bp += texture2D(bg_texture, vec2(blurcoord[4].x, uv.y)) * 0.093913; // -3.5px
+#version 460
+#extension GL_EXT_shader_explicit_arithmetic_types_f16 : require
+
+layout(local_size_x = 32, local_size_y = 8, local_size_z = 1) in;
+
+layout(set=0, binding=0) uniform image2D imgInput;  // RGBA16F
+layout(set=0, binding=1) uniform image2D imgTemp;   // RGBA16F Intermediate
+layout(set=0, binding=2) uniform image2D imgOutput; // RGBA16F Output
+
+layout(push_constant) uniform GaussianPushConstants {
+    ivec2 resolution;
+    float invSigma2;
+    int radius;
+    int pass; // 0 = Horizontal (LDS), 1 = Vertical
+} pc;
+
+shared vec4 tile_h[64][8]; // 8 KB LDS
+
+void main() {
+    ivec2 global = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 local  = ivec2(gl_LocalInvocationID.xy);
+    ivec2 dim    = imageSize(imgInput);
+
+    if (global.x >= dim.x || global.y >= dim.y) return;
+
+    if (pc.pass == 0) { // Pase Horizontal con LDS
+        tile_h[local.x + pc.radius][local.y] = imageLoad(imgInput, ivec2(clamp(global.x, 0, dim.x-1), global.y));
+
+        if (local.x < pc.radius)
+            tile_h[local.x][local.y] = imageLoad(imgInput, ivec2(clamp(global.x - pc.radius, 0, dim.x-1), global.y));
+        if (local.x >= 32 - pc.radius)
+            tile_h[local.x + 2*pc.radius][local.y] = imageLoad(imgInput, ivec2(clamp(global.x + pc.radius, 0, dim.x-1), global.y));
+
+        barrier();
+
+        vec4 sum = vec4(0.0);
+        float weightSum = 0.0;
+
+        for (int i = -pc.radius; i <= pc.radius; ++i) {
+            float x = float(i);
+            float w = exp(-x * x * pc.invSigma2);
+            sum += tile_h[local.x + pc.radius + i][local.y] * w;
+            weightSum += w;
+        }
+
+        imageStore(imgTemp, global, sum / weightSum);
+    } else { // Pase Vertical
+        vec4 sum = vec4(0.0);
+        float weightSum = 0.0;
+
+        for (int i = -pc.radius; i <= pc.radius; ++i) {
+            int y = clamp(global.y + i, 0, dim.y - 1);
+            float x = float(i);
+            float w = exp(-x * x * pc.invSigma2);
+            sum += imageLoad(imgTemp, ivec2(global.x, y)) * w;
+            weightSum += w;
+        }
+        imageStore(imgOutput, global, sum / weightSum);
+    }
+}
 ```
 
-Las coordenadas de muestreo se precalculan en el **vertex shader** para ahorrar cálculos en el fragment shader (optimización de GPU).
+---
+
+## 3. Dual Kawase Blur Híbrido (Compute Down + Graphics Up)
+
+Para radios grandes ($r \ge 15\text{px}$), el número de iteraciones se calcula en CPU:
+
+$$\text{iterations} = \max\left(1, \; \lfloor \log_2(\text{targetRadius}) \rfloor - 1\right)$$
+
+### A. Down Pass Compute (`kawase_down.comp`)
+```glsl
+#version 460
+layout(local_size_x = 16, local_size_y = 16) in;
+layout(set=0, binding=0) uniform image2D src;
+layout(set=0, binding=1) uniform image2D dst;
+
+layout(push_constant) uniform PushConst { ivec2 srcSize; float offset; } pc;
+
+void main() {
+    ivec2 dstPos = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 dstSize = imageSize(dst);
+    if (dstPos.x >= dstSize.x || dstPos.y >= dstSize.y) return;
+
+    ivec2 c = ivec2((vec2(dstPos) * 2.0) + 0.5);
+    vec4 sum = imageLoad(src, c) * 4.0;
+    sum += imageLoad(src, c + ivec2(-1, 0) * pc.offset);
+    sum += imageLoad(src, c + ivec2(1, 0) * pc.offset);
+    sum += imageLoad(src, c + ivec2(0, -1) * pc.offset);
+    sum += imageLoad(src, c + ivec2(0, 1) * pc.offset);
+
+    imageStore(dst, dstPos, sum * 0.125);
+}
+```
+
+### B. Up Pass Fragment Shader (`kawase_up.frag`)
+El pase de subida usa el hardware TMU de texturizado para filtrado bilineal gratis (`VK_FILTER_LINEAR`):
+
+```glsl
+#version 450
+layout(binding = 0) uniform sampler2D srcLow;
+in vec2 vUV;
+out vec4 fragColor;
+
+uniform vec2 u_texel;
+uniform float u_offset;
+
+void main() {
+    vec2 d = u_texel * u_offset;
+    vec4 sum = texture(srcLow, vUV + vec2(-d.x * 2.0, 0.0)) * 1.0;
+    sum += texture(srcLow, vUV + vec2(-d.x, d.y)) * 2.0;
+    sum += texture(srcLow, vUV + vec2(0.0, d.y * 2.0)) * 1.0;
+    sum += texture(srcLow, vUV + vec2(d.x, d.y)) * 2.0;
+    sum += texture(srcLow, vUV + vec2(d.x * 2.0, 0.0)) * 1.0;
+    sum += texture(srcLow, vUV + vec2(d.x, -d.y)) * 2.0;
+    sum += texture(srcLow, vUV + vec2(0.0, -d.y * 2.0)) * 1.0;
+    sum += texture(srcLow, vUV + vec2(-d.x, -d.y)) * 2.0;
+    fragColor = sum / 12.0;
+}
+```
 
 ---
 
-## 3. Desenfoque Kawase (Dual Kawase Filter)
+## 4. C++20 Frame Graph Node: `KawaseBlurPass` (con Memory Aliasing)
 
-El filtro Kawase es significativamente más eficiente para desenfoque grande. Combina:
-1. **Etapa de Downsampling**: Reducción iterativa de la resolución.
-2. **Etapa de Upsampling**: Reconstrucción con desenfoque implícito.
+Las texturas transitorias `Down_i` y `Up_{N-i-1}` comparten la misma memoria `VkDeviceMemory` mediante VMA al tener dimensiones coincidentes en la cadena de reducciones:
 
-### A. Etapa de Downsampling (Muestreo hacia abajo)
-En cada iteración $i$, la resolución se reduce a la mitad ($W/2^i \times H/2^i$) y se muestrea con un patrón de diamante de 5 puntos:
+```cpp
+// KawaseBlurPass.hpp (C++20 Engine)
+#pragma once
+#include "vulkan/frame_graph.hpp"
 
-$$\text{pixel}_{out} = \frac{1}{8}\left(4 \cdot T(uv) + T(uv - \Delta) + T(uv + \Delta) + T(uv + \Delta') + T(uv - \Delta')\right)$$
+class KawaseBlurPass : public EffectNode {
+public:
+    void setup(FrameGraph& fg, ResourceHandle input, ResourceHandle output, float radius) override {
+        uint32_t iterations = std::max(1u, (uint32_t)std::floor(std::log2(radius)) - 1u);
+        ResourceHandle current = input;
 
-Donde $\Delta = (halfpixel.x \cdot offset, halfpixel.y \cdot offset)$ y $\Delta'$ es la versión en espejo diagonal.
+        // Down Passes (Compute)
+        for (uint32_t i = 0; i < iterations; ++i) {
+            ResourceHandle down = fg.createTransientImage("Kawase_Down_" + std::to_string(i),
+                VK_FORMAT_R16G16B16A16_SFLOAT);
+            fg.addComputePass("Kawase_Down_" + std::to_string(i), [=](FrameGraphBuilder& b) {
+                b.read(current).write(down);
+            });
+            downHandles_.push_back(down);
+            current = down;
+        }
 
-### B. Etapa de Upsampling (Muestreo hacia arriba)
-La reconstitución usa un patrón de 8 muestras con un filtro de tent:
+        // Up Passes (Graphics Fullscreen Triangle)
+        for (int i = (int)iterations - 1; i >= 0; --i) {
+            ResourceHandle up = (i == 0) ? output : fg.createTransientImage("Kawase_Up_" + std::to_string(i),
+                VK_FORMAT_R16G16B16A16_SFLOAT); // Aliased with Down_i by VMA
+            fg.addGraphicsPass("Kawase_Up_" + std::to_string(i), [=](FrameGraphBuilder& b) {
+                b.read(current).write(up).renderFullscreenTriangle();
+            });
+            current = up;
+        }
+    }
 
-$$\text{pixel}_{out} = \frac{1}{12}\left(\sum_{i \in \text{diagonales}} 2 \cdot T(uv + d_i) + \sum_{j \in \text{ortogonales}} T(uv + d_j)\right)$$
+    void execute(VkCommandBuffer cmd, FrameData& fd) override {}
 
-### Radio de Desenfoque Efectivo
-$$r_{kawase} = 2^{iterations + 1} \cdot offset \cdot degrade\_factor$$
-
----
-
-## 4. Implementación en C++20 / Vulkan (Compute Shaders)
-
-En nuestro motor:
-- El Gaussian Blur se implementa con 2 **Compute Shaders de Vulkan** (pase horizontal + vertical), usando un `sampler2D` con filtrado `VK_FILTER_LINEAR`.
-- El Kawase Blur requiere **framebuffers intermedios** (`VkImage` con `VK_IMAGE_USAGE_STORAGE_BIT`) para las etapas de downsampling y upsampling.
-- Ambos operan sobre la textura de la ventana capturada vía `dma-buf` sin copias adicionales.
+private:
+    std::vector<ResourceHandle> downHandles_;
+};
+```
 # Análisis Matemático: Scale/Expo (Vista General de Workspaces)
 
 ## Fuentes de Referencia
