@@ -1,26 +1,19 @@
 # Wave 005 — wave_004_2_freewins_plugin_analysis
 
 ## Wave Objective
-[Define the objective of this wave]
+Deconstrucción matemática del plugin Freewins de Compiz 0.9.14.2 (transformaciones libres 3D: rotación, escala, skew) y especificación de modernización para Vulkan / Wayland (Raycasting Ray-Plane Unproject).
 
 ## Requirements & Acceptance Criteria
-- [ ] Req 1: [Description]
-- [ ] Req 2: [Description]
+- [x] Req 1: Analizar las matrices de transformación homogéneas 4x4 (traslación, rotación Euler 3D, skew/cizallamiento, escala) del código fuente de Compiz (`freewins.cpp`).
+- [x] Req 2: Diseñar el pipeline C++20/Vulkan con Push Constants (GLM mat4) e intersección de rayos 3D en Wayland para redirección de input precisa.
 
 ## Tasks List (Mapped to Requirements)
-- [ ] Task 1 (Req 1): [Description]
-- [ ] Task 2 (Req 2): [Description]
+- [x] Task 1 (Req 1): Analizar `compiz-0.9.14.2/plugins/freewins/src/freewins.cpp`.
+- [x] Task 2 (Req 2): Crear `docs/math_freewins_analysis.md` con la matemática completa y la arquitectura Raycasting Wayland.
 
 ## Verification Plan
-- [ ] Verification 1: [Description]
+- [x] Verification 1: Confirmar las ecuaciones de transformación 3D, cizallamiento y la geometría Ray-Plane NDC.
 
 ## Alignment Q&A (Interaction Notes)
-- **Q**: [Target clarifying question 1]
-- **A**: [User answer]
-- **Q**: [Target clarifying question 2]
-- **A**: [User answer]
-
-## Suggested ADRs (Optional)
-### ADR: [Title]
-* **Context**: [Details]
-* **Decision**: [Details]
+- **Q**: ¿Cómo se solucionará la redirección de entrada de ventanas 3D rotadas en Wayland?
+- **A**: Con Raycasting 3D exacto des-proyectando el puntero del ratón desde el frustum NDC hasta el plano transformado de la ventana.
