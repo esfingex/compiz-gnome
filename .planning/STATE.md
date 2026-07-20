@@ -11,3 +11,4 @@
 - ADR-003: Memory-Mapped IPC with SCM_RIGHTS (DMA-BUF & Sync FDs) for Zero-Copy VRAM transfer.
 - ADR-004: Vulkan 1.3 Timeline Semaphores (`VK_KHR_timeline_semaphore`) for explicit sync with Mutter (`eglWaitSyncKHR`).
 - ADR-005: Vertical Slice MVP strategy: First implementation milestone is Water Ripple on window drag.
+- ADR-006: Master Architecture Audit approved: Complete CPU/GPU classification split across 88 plugins, Frame Graph transient aliasing map, Protobuf schema (`water.proto`), and 4-week MVP execution plan.
