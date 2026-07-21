@@ -31,9 +31,16 @@ set(ENGINE_SOURCES
     src/core_cpp/ipc_server.cpp
     src/core_cpp/vulkan_context.cpp
     src/core_cpp/framegraph.cpp
+    src/core_cpp/shader_hot_reload.cpp
     src/core_cpp/passes/water_compute_pass.cpp
     src/core_cpp/passes/wobbly_compute_pass.cpp
     src/core_cpp/passes/burn_compute_pass.cpp
+    src/core_cpp/passes/shift_render_pass.cpp
+    src/core_cpp/passes/ring_render_pass.cpp
+    src/core_cpp/passes/animation_mesh_pass.cpp
+    src/core_cpp/passes/kawase_blur_pass.cpp
+    src/core_cpp/passes/annotate_compute_pass.cpp
+    src/core_cpp/passes/showmouse_compute_pass.cpp
 )
 
 # Core Executable
