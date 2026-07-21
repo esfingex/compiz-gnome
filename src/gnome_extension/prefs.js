@@ -88,24 +88,41 @@ export default class CompizPreferences extends ExtensionPreferences {
         this._addSpinRow(showmouseGroup, settings, 'magnifier-zoom',
             _('Factor de Zoom (Lupa)'), 1.0, 10.0, 0.5);
 
-        // SECCIÓN: FÍSICA Y PARÁMETROS
+        // SECCIÓN: FÍSICA Y PARÁMETROS WOBBLY
+        const wobblyGroup = new Adw.PreferencesGroup({
+            title: _('Física de Wobbly Windows (Ventanas Gelatinosas)'),
+            description: _('Ajusta la flexibilidad, resistencia y sensibilidad del bamboleo')
+        });
+        effectsPage.add(wobblyGroup);
+
+        this._addSpinRow(wobblyGroup, settings, 'wobbly-spring-k',
+            _('Tensión / Rigidez del Resorte (K)'), 0.5, 10.0, 0.5);
+
+        this._addSpinRow(wobblyGroup, settings, 'wobbly-friction',
+            _('Amortiguamiento de Fricción'), 0.5, 0.99, 0.05);
+
+        this._addSpinRow(wobblyGroup, settings, 'wobbly-max-deformation',
+            _('Deformación Máxima Permitida (px)'), 10, 200, 10);
+
+        this._addSpinRow(wobblyGroup, settings, 'wobbly-impulse',
+            _('Sensibilidad al Movimiento del Ratón'), 0.1, 3.0, 0.1);
+
+        // SECCIÓN: OTROS PARÁMETROS FÍSICOS
         const physicsGroup = new Adw.PreferencesGroup({
-            title: _('Parámetros de Física & Calidad'),
-            description: _('Ajusta el comportamiento de las simulaciones en tiempo real')
+            title: _('Parámetros de Física Generales'),
+            description: _('Ajustes para agua, fuego y desenfoque')
         });
         effectsPage.add(physicsGroup);
 
         this._addSpinRow(physicsGroup, settings, 'water-speed',
             _('Velocidad del Agua'), 0.1, 2.0, 0.1);
 
-        this._addSpinRow(physicsGroup, settings, 'wobbly-spring-k',
-            _('Rigidez de Resortes (Wobbly)'), 0.5, 10.0, 0.5);
-
         this._addSpinRow(physicsGroup, settings, 'burn-particles',
             _('Cantidad de Partículas de Fuego'), 1000, 100000, 5000);
 
         this._addSpinRow(physicsGroup, settings, 'blur-radius',
             _('Radio de Desenfoque (Blur)'), 1, 50, 1);
+
 
         // ─── TAB 2: CONFIGURACIÓN DE SISTEMA & IPC ───────────────────────────
         const systemPage = new Adw.PreferencesPage({

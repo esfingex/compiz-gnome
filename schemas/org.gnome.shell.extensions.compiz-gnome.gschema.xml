@@ -125,8 +125,27 @@
     <key name="wobbly-spring-k" type="d">
       <default>2.0</default>
       <range min="0.5" max="10.0"/>
-      <summary>Constante de rigidez de resortes para Wobbly</summary>
+      <summary>Constante de rigidez de resortes para Wobbly (Tensión)</summary>
     </key>
+
+    <key name="wobbly-friction" type="d">
+      <default>0.82</default>
+      <range min="0.5" max="0.99"/>
+      <summary>Amortiguamiento de fricción para Wobbly</summary>
+    </key>
+
+    <key name="wobbly-max-deformation" type="d">
+      <default>60.0</default>
+      <range min="10.0" max="200.0"/>
+      <summary>Deformación física máxima de Wobbly (px)</summary>
+    </key>
+
+    <key name="wobbly-impulse" type="d">
+      <default>0.60</default>
+      <range min="0.1" max="3.0"/>
+      <summary>Sensibilidad del impulso por movimiento del ratón</summary>
+    </key>
+
 
     <key name="burn-particles" type="i">
       <default>50000</default>

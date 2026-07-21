@@ -1,6 +1,6 @@
 // GNOME Shell 50+ Extension — Compiz GNOME Effects
-// Integra: Wobbly Windows (Spring-Mass Physics), Water Ripple,
-// IpcClient (Unix Socket), reactividad GSettings y ciclos de vida Mutter.
+// Integra: Wobbly Windows (Física Resorte-Masa parametrizable en tiempo real),
+// Water Ripple, IpcClient (Unix Socket), reactividad GSettings y ciclo de vida de Mutter.
 
 import { Extension } from 'resource:///org/gnome/shell/extensions/extension.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
@@ -22,8 +22,8 @@ class WobblyEffect extends Clutter.Effect {
     _init(settings) {
         super._init();
         this._settings = settings;
-        this._lastX = 0;
-        this._lastY = 0;
+        this._lastPx = 0;
+        this._lastPy = 0;
         this._vx = 0;
         this._vy = 0;
         this._dx = 0;
@@ -32,31 +32,18 @@ class WobblyEffect extends Clutter.Effect {
         this._animId = null;
     }
 
-    onGrabBegin(x, y) {
+    onGrabBegin() {
+        const [px, py] = global.get_pointer();
         this._isDragging = true;
-        this._lastX = x;
-        this._lastY = y;
+        this._lastPx = px;
+        this._lastPy = py;
         this._startLoop();
     }
 
     onPositionChanged(newX, newY) {
         if (!this._isDragging) {
-            this.onGrabBegin(newX, newY);
-            return;
+            this.onGrabBegin();
         }
-
-        const deltaX = newX - this._lastX;
-        const deltaY = newY - this._lastY;
-        this._lastX = newX;
-        this._lastY = newY;
-
-        // Impulso de velocidad proporcional al movimiento del ratón
-        this._vx += deltaX * 0.45;
-        this._vy += deltaY * 0.45;
-
-        // Limitar velocidad máxima para evitar aberraciones geométricas
-        this._vx = Math.max(-120, Math.min(120, this._vx));
-        this._vy = Math.max(-120, Math.min(120, this._vy));
     }
 
     onGrabEnd() {
@@ -66,9 +53,25 @@ class WobblyEffect extends Clutter.Effect {
     _startLoop() {
         if (this._animId) return;
         this._animId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 16, () => {
-            const springK = this._settings?.get_double('wobbly-spring-k') || 2.0;
+            // Leer parámetros físicos configurables dinámicamente desde GSettings
+            const springK   = this._settings?.get_double('wobbly-spring-k') ?? 2.0;
+            const friction  = this._settings?.get_double('wobbly-friction') ?? 0.82;
+            const maxDeform = this._settings?.get_double('wobbly-max-deformation') ?? 60.0;
+            const impulse   = this._settings?.get_double('wobbly-impulse') ?? 0.60;
+
             const k = springK * 0.08;
-            const friction = 0.82;
+
+            // Seguimiento directo en tiempo real del puntero en Wayland
+            if (this._isDragging) {
+                const [px, py] = global.get_pointer();
+                const deltaX = px - this._lastPx;
+                const deltaY = py - this._lastPy;
+                this._lastPx = px;
+                this._lastPy = py;
+
+                this._vx += deltaX * impulse;
+                this._vy += deltaY * impulse;
+            }
 
             // Ley de Hooke con amortiguamiento viscoso
             const ax = -k * this._dx - (1.0 - friction) * this._vx;
@@ -80,7 +83,11 @@ class WobblyEffect extends Clutter.Effect {
             this._dx += this._vx;
             this._dy += this._vy;
 
-            // Si está en reposo y se soltó el agarre, finalizar animación
+            // Clampear deformación máxima según preferencia del usuario
+            this._dx = Math.max(-maxDeform, Math.min(maxDeform, this._dx));
+            this._dy = Math.max(-maxDeform, Math.min(maxDeform, this._dy));
+
+            // Detener bucle cuando está en reposo y se soltó la ventana
             if (!this._isDragging &&
                 Math.abs(this._dx) < 0.1 && Math.abs(this._dy) < 0.1 &&
                 Math.abs(this._vx) < 0.1 && Math.abs(this._vy) < 0.1) {
@@ -102,19 +109,19 @@ class WobblyEffect extends Clutter.Effect {
         const actor = this.get_actor();
         if (!actor) return;
 
-        // Ajustar punto de pivote en la parte superior central
+        // Punto de pivote en la parte superior central de la ventana
         actor.set_pivot_point(0.5, 0.0);
 
-        // Ángulo de inclinación según desplazamiento horizontal (máx ±25 grados)
-        const rotZ = Math.max(-25.0, Math.min(25.0, this._dx * 0.15));
+        // Ángulo de inclinación según desplazamiento horizontal (máx ±30°)
+        const rotZ = Math.max(-30.0, Math.min(30.0, this._dx * 0.20));
 
         // Deformación elástica vertical y horizontal
-        const scaleX = 1.0 - Math.min(0.25, Math.abs(this._dy) * 0.0015);
-        const scaleY = 1.0 + Math.min(0.25, Math.abs(this._dy) * 0.0015);
+        const scaleX = 1.0 - Math.min(0.35, Math.abs(this._dy) * 0.0020);
+        const scaleY = 1.0 + Math.min(0.35, Math.abs(this._dy) * 0.0020);
 
-        // Inercia de traslación
-        const transX = -this._dx * 0.25;
-        const transY = -this._dy * 0.25;
+        // Traslación de inercia
+        const transX = -this._dx * 0.30;
+        const transY = -this._dy * 0.30;
 
         actor.set_rotation_angle(Clutter.RotateAxis.Z_AXIS, rotZ);
         actor.set_scale(scaleX, scaleY);
@@ -236,8 +243,7 @@ export default class CompizExtension extends Extension {
                 if (!metaWindow) return;
                 const entry = this._windowActors.get(metaWindow.get_id());
                 if (entry && entry.wobblyEffect) {
-                    const rect = metaWindow.get_frame_rect();
-                    entry.wobblyEffect.onGrabBegin(rect.x, rect.y);
+                    entry.wobblyEffect.onGrabBegin();
                 }
             })
         );
@@ -252,7 +258,7 @@ export default class CompizExtension extends Extension {
             })
         );
 
-        // 4. Captura global de eventos de puntero para impactos de agua
+        // 4. Captura global de eventos de puntero (para Water Impact y soltar agarre Wobbly)
         this._signalIds.push(
             global.stage.connect('captured-event', (_stage, event) => {
                 return this._onCapturedEvent(event);
@@ -415,6 +421,13 @@ export default class CompizExtension extends Extension {
     _onCapturedEvent(event) {
         const type = event.type();
 
+        if (type === Clutter.EventType.BUTTON_RELEASE || type === Clutter.EventType.TOUCH_END) {
+            for (const [, entry] of this._windowActors) {
+                entry.wobblyEffect?.onGrabEnd();
+            }
+            return Clutter.EVENT_PROPAGATE;
+        }
+
         if (type !== Clutter.EventType.BUTTON_PRESS &&
             type !== Clutter.EventType.TOUCH_BEGIN) {
             return Clutter.EVENT_PROPAGATE;
@@ -427,6 +440,10 @@ export default class CompizExtension extends Extension {
         const windowId = metaWindow.get_id();
         const entry = this._windowActors.get(windowId);
         if (!entry) return Clutter.EVENT_PROPAGATE;
+
+        if (entry.wobblyEffect) {
+            entry.wobblyEffect.onGrabBegin();
+        }
 
         const [ax, ay] = [
             (ex - entry.actor.x) / entry.actor.width,
