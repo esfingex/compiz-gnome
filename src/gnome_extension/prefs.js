@@ -1,5 +1,6 @@
 // src/gnome_extension/prefs.js
 // Panel de configuración nativo para Compiz GNOME Effects usando Libadwaita (GTK4/Adw)
+// Estructura en Árbol / Acordeón desplegable (Adw.ExpanderRow) con persistencia dconf / GSettings
 
 import { ExtensionPreferences, gettext as _ } from 'resource:///org/gnome/Shell/Extensions/js/extensions/prefs.js';
 import Adw from 'gi://Adw';
@@ -11,117 +12,125 @@ export default class CompizPreferences extends ExtensionPreferences {
     fillPreferencesWindow(window) {
         const settings = this.getSettings('org.gnome.shell.extensions.compiz-gnome');
 
-        // ─── TAB 1: EFECTOS VISUALES ──────────────────────────────────────────
+        // ─── TAB 1: EFECTOS VISUALES & ÁRBOLES DESPLEGABLES ──────────────────
         const effectsPage = new Adw.PreferencesPage({
             title: _('Efectos Visuales'),
             icon_name: 'preferences-desktop-effects-symbolic'
         });
         window.add(effectsPage);
 
-        // SECCIÓN: EFECTOS PRINCIPALES
-        const generalGroup = new Adw.PreferencesGroup({
-            title: _('Efectos Principales'),
-            description: _('Activa o desactiva los efectos gráficos Vulkan 1.3')
+        const effectsGroup = new Adw.PreferencesGroup({
+            title: _('Catálogo de Efectos de Compiz'),
+            description: _('Despliega cada efecto para configurar sus parámetros físicos en tiempo real (Persistencia automática en dconf)')
         });
-        effectsPage.add(generalGroup);
+        effectsPage.add(effectsGroup);
 
-        this._addSwitch(generalGroup, settings, 'water-enabled',
-            _('Water Ripple (Ondas de Agua)'),
-            _('Simula ondas de agua físicas a 120Hz al arrastrar ventanas'));
+        // 1. WOBBLY WINDOWS
+        this._addExpanderGroup(effectsGroup, settings, 'wobbly-enabled',
+            _('🪟 Wobbly Windows (Ventanas Gelatinosas)'),
+            _('Simulación física resorte-masa con Bézier bicúbica'),
+            (expander) => {
+                this._addSpinRow(expander, settings, 'wobbly-spring-k',
+                    _('Tensión / Rigidez del Resorte (K)'), 0.5, 10.0, 0.5);
+                this._addSpinRow(expander, settings, 'wobbly-friction',
+                    _('Amortiguamiento de Fricción'), 0.5, 0.99, 0.05);
+                this._addSpinRow(expander, settings, 'wobbly-max-deformation',
+                    _('Deformación Máxima Permitida (px)'), 10, 200, 10);
+                this._addSpinRow(expander, settings, 'wobbly-impulse',
+                    _('Sensibilidad al Movimiento del Ratón'), 0.1, 3.0, 0.1);
+            }
+        );
 
-        this._addSwitch(generalGroup, settings, 'wobbly-enabled',
-            _('Wobbly Windows (Ventanas Gelatinosas)'),
-            _('Simulación de masa-resorte GPU con Bézier bicúbica'));
+        // 2. WATER RIPPLE
+        this._addExpanderGroup(effectsGroup, settings, 'water-enabled',
+            _('💧 Water Ripple (Ondas de Agua)'),
+            _('Simulación de fluidos FDM 2D en Compute Shader a 120Hz'),
+            (expander) => {
+                this._addSpinRow(expander, settings, 'water-speed',
+                    _('Velocidad de Propagación de Ondas'), 0.1, 2.0, 0.1);
+            }
+        );
 
-        this._addSwitch(generalGroup, settings, 'burn-enabled',
-            _('Burn Firepaint (Efecto de Fuego)'),
-            _('Quema la superficie de la ventana con 65k partículas en Compute Shader'));
+        // 3. BURN FIREPAINT
+        this._addExpanderGroup(effectsGroup, settings, 'burn-enabled',
+            _('🔥 Burn Firepaint (Efecto de Fuego)'),
+            _('Quema ventanas con 65k partículas Compute Shader'),
+            (expander) => {
+                this._addSpinRow(expander, settings, 'burn-particles',
+                    _('Cantidad de Partículas de Fuego'), 1000, 100000, 5000);
+            }
+        );
 
-        this._addSwitch(generalGroup, settings, 'shift-enabled',
-            _('Shift Cover Flow (Reflexión Planar)'),
-            _('Navegación de ventanas 3D con espejo y desenfoque glossy en suelo'));
+        // 4. SHIFT COVER FLOW
+        this._addExpanderGroup(effectsGroup, settings, 'shift-enabled',
+            _('🌀 Shift Cover Flow (Reflexión Planar)'),
+            _('Navegación 3D con suelo espejado y desenfoque glossy'),
+            (expander) => {
+                this._addEntryRow(expander, settings, 'shift-shortcut',
+                    _('Atajo de Teclado'), _('Por defecto: <Super>e'));
+            }
+        );
 
-        this._addSwitch(generalGroup, settings, 'ring-enabled',
-            _('Ring Switcher (Carrusel 3D Alt+Tab)'),
-            _('Anillo orbital 3D inclinado para selección de ventanas'));
+        // 5. RING SWITCHER
+        this._addExpanderGroup(effectsGroup, settings, 'ring-enabled',
+            _('🎯 Ring Switcher (Carrusel 3D Alt+Tab)'),
+            _('Anillo orbital 3D inclinado para selección de ventanas'),
+            (expander) => {
+                this._addEntryRow(expander, settings, 'ring-shortcut',
+                    _('Atajo de Teclado'), _('Por defecto: <Super>w'));
+            }
+        );
 
-        this._addSwitch(generalGroup, settings, 'animation-enabled',
-            _('Animation Suite (Magic Lamp, Curl, Explode)'),
-            _('Transiciones de teselación adaptativa al abrir/cerrar ventanas'));
+        // 6. ANIMATION SUITE
+        this._addExpanderGroup(effectsGroup, settings, 'animation-enabled',
+            _('🎬 Animation Suite (Magic Lamp, Curl, Explode)'),
+            _('Transiciones de teselación adaptativa al abrir/cerrar ventanas'),
+            (expander) => {}
+        );
 
-        this._addSwitch(generalGroup, settings, 'blur-enabled',
-            _('Dual Kawase Blur (Desenfoque de Fondo)'),
-            _('Filtro de desenfoque multicapa O(8N) por GPU'));
+        // 7. DUAL KAWASE BLUR
+        this._addExpanderGroup(effectsGroup, settings, 'blur-enabled',
+            _('🧊 Dual Kawase Blur (Desenfoque de Fondo)'),
+            _('Filtro de desenfoque multicapa O(8N) por GPU'),
+            (expander) => {
+                this._addSpinRow(expander, settings, 'blur-radius',
+                    _('Radio de Desenfoque (px)'), 1, 50, 1);
+            }
+        );
 
-        // SECCIÓN: ANNOTATE & PAINTFIRE
-        const annotateGroup = new Adw.PreferencesGroup({
-            title: _('Annotate & Paintfire'),
-            description: _('Dibujo dinámico sobre la pantalla con fuego o tinta')
-        });
-        effectsPage.add(annotateGroup);
+        // 8. ANNOTATE & PAINTFIRE
+        this._addExpanderGroup(effectsGroup, settings, 'annotate-enabled',
+            _('🎨 Annotate & Paintfire (Dibujo en Pantalla)'),
+            _('Permite realizar trazos gráficos flotantes sobre el escritorio'),
+            (expander) => {
+                this._addSpinRow(expander, settings, 'annotate-brush-size',
+                    _('Tamaño del Pincel'), 1, 100, 1);
+            }
+        );
 
-        this._addSwitch(annotateGroup, settings, 'annotate-enabled',
-            _('Habilitar Annotate'),
-            _('Permite realizar trazos gráficos flotantes sobre el escritorio'));
+        // 9. SHOWMOUSE
+        this._addExpanderGroup(effectsGroup, settings, 'showmouse-enabled',
+            _('🐭 Showmouse (Partículas del Cursor)'),
+            _('Anillos y chispas de partículas alrededor del puntero'),
+            (expander) => {
+                this._addSpinRow(expander, settings, 'showmouse-ring-radius',
+                    _('Radio del Anillo (px)'), 10, 200, 5);
+                this._addSpinRow(expander, settings, 'showmouse-num-particles',
+                    _('Cantidad de Partículas'), 64, 2048, 64);
+            }
+        );
 
-        this._addSpinRow(annotateGroup, settings, 'annotate-brush-size',
-            _('Tamaño del Pincel'), 1, 100, 1);
-
-        // SECCIÓN: SHOWMOUSE & MAGNIFIER
-        const showmouseGroup = new Adw.PreferencesGroup({
-            title: _('Showmouse & Magnifier (Cursor & Lupa)'),
-            description: _('Partículas de seguimiento del cursor y lupa dinámica')
-        });
-        effectsPage.add(showmouseGroup);
-
-        this._addSwitch(showmouseGroup, settings, 'showmouse-enabled',
-            _('Habilitar Showmouse'),
-            _('Anillos y chispas de partículas alrededor del puntero'));
-
-        this._addSpinRow(showmouseGroup, settings, 'showmouse-ring-radius',
-            _('Radio del Anillo (px)'), 10, 200, 5);
-
-        this._addSwitch(showmouseGroup, settings, 'magnifier-enabled',
-            _('Habilitar Magnifier (Lupa)'),
-            _('Lupa esférica dinámica con filtrado Catmull-Rom'));
-
-        this._addSpinRow(showmouseGroup, settings, 'magnifier-zoom',
-            _('Factor de Zoom (Lupa)'), 1.0, 10.0, 0.5);
-
-        // SECCIÓN: FÍSICA Y PARÁMETROS WOBBLY
-        const wobblyGroup = new Adw.PreferencesGroup({
-            title: _('Física de Wobbly Windows (Ventanas Gelatinosas)'),
-            description: _('Ajusta la flexibilidad, resistencia y sensibilidad del bamboleo')
-        });
-        effectsPage.add(wobblyGroup);
-
-        this._addSpinRow(wobblyGroup, settings, 'wobbly-spring-k',
-            _('Tensión / Rigidez del Resorte (K)'), 0.5, 10.0, 0.5);
-
-        this._addSpinRow(wobblyGroup, settings, 'wobbly-friction',
-            _('Amortiguamiento de Fricción'), 0.5, 0.99, 0.05);
-
-        this._addSpinRow(wobblyGroup, settings, 'wobbly-max-deformation',
-            _('Deformación Máxima Permitida (px)'), 10, 200, 10);
-
-        this._addSpinRow(wobblyGroup, settings, 'wobbly-impulse',
-            _('Sensibilidad al Movimiento del Ratón'), 0.1, 3.0, 0.1);
-
-        // SECCIÓN: OTROS PARÁMETROS FÍSICOS
-        const physicsGroup = new Adw.PreferencesGroup({
-            title: _('Parámetros de Física Generales'),
-            description: _('Ajustes para agua, fuego y desenfoque')
-        });
-        effectsPage.add(physicsGroup);
-
-        this._addSpinRow(physicsGroup, settings, 'water-speed',
-            _('Velocidad del Agua'), 0.1, 2.0, 0.1);
-
-        this._addSpinRow(physicsGroup, settings, 'burn-particles',
-            _('Cantidad de Partículas de Fuego'), 1000, 100000, 5000);
-
-        this._addSpinRow(physicsGroup, settings, 'blur-radius',
-            _('Radio de Desenfoque (Blur)'), 1, 50, 1);
+        // 10. MAGNIFIER
+        this._addExpanderGroup(effectsGroup, settings, 'magnifier-enabled',
+            _('🔍 Magnifier (Lupa Dinámica)'),
+            _('Lupa esférica dinámica con filtrado Catmull-Rom'),
+            (expander) => {
+                this._addSpinRow(expander, settings, 'magnifier-zoom',
+                    _('Factor de Zoom (Lupa)'), 1.0, 10.0, 0.5);
+                this._addSpinRow(expander, settings, 'magnifier-radius',
+                    _('Radio de la Lupa (px)'), 50, 500, 25);
+            }
+        );
 
 
         // ─── TAB 2: CONFIGURACIÓN DE SISTEMA & IPC ───────────────────────────
@@ -145,20 +154,12 @@ export default class CompizPreferences extends ExtensionPreferences {
         this._addSpinRow(ipcGroup, settings, 'fixed-timestep-hz',
             _('Frecuencia Física (Hz)'), 30, 240, 10);
 
-        // SECCIÓN: ATAJOS DE TECLADO
+        // SECCIÓN: ATAJOS DE TECLADO GLOBAL
         const shortcutsGroup = new Adw.PreferencesGroup({
             title: _('Atajos de Teclado del Sistema'),
             description: _('Combos globales para activar efectos 3D y agrupamiento')
         });
         systemPage.add(shortcutsGroup);
-
-        this._addEntryRow(shortcutsGroup, settings, 'ring-shortcut',
-            _('Atajo Ring Switcher 3D'),
-            _('Por defecto: <Super>w'));
-
-        this._addEntryRow(shortcutsGroup, settings, 'shift-shortcut',
-            _('Atajo Shift Cover Flow'),
-            _('Por defecto: <Super>e'));
 
         this._addEntryRow(shortcutsGroup, settings, 'expo-shortcut',
             _('Atajo Expo / Scale'),
@@ -168,10 +169,10 @@ export default class CompizPreferences extends ExtensionPreferences {
             _('Atajo Grouping Windows'),
             _('Por defecto: <Super>g'));
 
-        // SECCIÓN: ESTADO DEL SERVICIO SYSTEMD Y DIAGNÓSTICO
+        // SECCIÓN: ESTADO DEL SERVICIO SYSTEMD
         const infoGroup = new Adw.PreferencesGroup({
             title: _('Estado del Servicio Systemd & Vulkan Engine'),
-            description: _('Servicio de usuario en segundo plano')
+            description: _('Base de datos dconf / GSettings sincronizada')
         });
         systemPage.add(infoGroup);
 
@@ -185,19 +186,19 @@ export default class CompizPreferences extends ExtensionPreferences {
         infoGroup.add(statusRow);
     }
 
-    _addSwitch(group, settings, key, title, subtitle) {
-        const row = new Adw.ActionRow({ title, subtitle });
-        const toggle = new Gtk.Switch({
-            active: settings.get_boolean(key),
-            valign: Gtk.Align.CENTER,
+    _addExpanderGroup(group, settings, enableKey, title, subtitle, setupSubRowsCallback) {
+        const expander = new Adw.ExpanderRow({
+            title,
+            subtitle,
+            show_enable_switch: true,
         });
-        settings.bind(key, toggle, 'active', Gio.SettingsBindFlags.DEFAULT);
-        row.add_suffix(toggle);
-        row.activatable_widget = toggle;
-        group.add(row);
+
+        settings.bind(enableKey, expander, 'enable-expansion', Gio.SettingsBindFlags.DEFAULT);
+        setupSubRowsCallback(expander);
+        group.add(expander);
     }
 
-    _addSpinRow(group, settings, key, title, min, max, step) {
+    _addSpinRow(container, settings, key, title, min, max, step) {
         const row = new Adw.ActionRow({ title });
         const value = settings.get_value(key);
         const typeChar = value.get_type_string();
@@ -211,10 +212,15 @@ export default class CompizPreferences extends ExtensionPreferences {
         spin.valign = Gtk.Align.CENTER;
         row.add_suffix(spin);
         row.activatable_widget = spin;
-        group.add(row);
+
+        if (container.add_row) {
+            container.add_row(row);
+        } else {
+            container.add(row);
+        }
     }
 
-    _addEntryRow(group, settings, key, title, subtitle) {
+    _addEntryRow(container, settings, key, title, subtitle) {
         const row = new Adw.ActionRow({ title, subtitle });
         const entry = new Gtk.Entry({
             text: settings.get_string(key) || '',
@@ -226,7 +232,11 @@ export default class CompizPreferences extends ExtensionPreferences {
         });
         row.add_suffix(entry);
         row.activatable_widget = entry;
-        group.add(row);
-    }
 
+        if (container.add_row) {
+            container.add_row(row);
+        } else {
+            container.add(row);
+        }
+    }
 }

@@ -40,12 +40,6 @@ class WobblyEffect extends Clutter.Effect {
         this._startLoop();
     }
 
-    onPositionChanged(newX, newY) {
-        if (!this._isDragging) {
-            this.onGrabBegin();
-        }
-    }
-
     onGrabEnd() {
         this._isDragging = false;
     }
@@ -53,7 +47,7 @@ class WobblyEffect extends Clutter.Effect {
     _startLoop() {
         if (this._animId) return;
         this._animId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 16, () => {
-            // Leer parámetros físicos configurables dinámicamente desde GSettings
+            // Leer parámetros físicos configurables dinámicamente desde GSettings (dconf)
             const springK   = this._settings?.get_double('wobbly-spring-k') ?? 2.0;
             const friction  = this._settings?.get_double('wobbly-friction') ?? 0.82;
             const maxDeform = this._settings?.get_double('wobbly-max-deformation') ?? 60.0;
@@ -61,7 +55,7 @@ class WobblyEffect extends Clutter.Effect {
 
             const k = springK * 0.08;
 
-            // Seguimiento directo en tiempo real del puntero en Wayland
+            // Seguimiento directo del puntero en Wayland a 60-120Hz
             if (this._isDragging) {
                 const [px, py] = global.get_pointer();
                 const deltaX = px - this._lastPx;
@@ -83,11 +77,11 @@ class WobblyEffect extends Clutter.Effect {
             this._dx += this._vx;
             this._dy += this._vy;
 
-            // Clampear deformación máxima según preferencia del usuario
+            // Clampear deformación máxima según preferencia configurada
             this._dx = Math.max(-maxDeform, Math.min(maxDeform, this._dx));
             this._dy = Math.max(-maxDeform, Math.min(maxDeform, this._dy));
 
-            // Detener bucle cuando está en reposo y se soltó la ventana
+            // Detener bucle cuando la ventana vuelve al reposo completo
             if (!this._isDragging &&
                 Math.abs(this._dx) < 0.1 && Math.abs(this._dy) < 0.1 &&
                 Math.abs(this._vx) < 0.1 && Math.abs(this._vy) < 0.1) {
@@ -109,23 +103,26 @@ class WobblyEffect extends Clutter.Effect {
         const actor = this.get_actor();
         if (!actor) return;
 
-        // Punto de pivote en la parte superior central de la ventana
-        actor.set_pivot_point(0.5, 0.0);
+        // Aplicar transformación sobre el actor hijo (superficie), de forma que Mutter
+        // no invalide la matriz del actor contenedor raíz.
+        const targetActor = actor.first_child || actor;
 
-        // Ángulo de inclinación según desplazamiento horizontal (máx ±30°)
-        const rotZ = Math.max(-30.0, Math.min(30.0, this._dx * 0.20));
+        targetActor.set_pivot_point(0.5, 0.0);
+
+        // Inclinación según desplazamiento horizontal (máx ±35°)
+        const rotZ = Math.max(-35.0, Math.min(35.0, this._dx * 0.25));
 
         // Deformación elástica vertical y horizontal
-        const scaleX = 1.0 - Math.min(0.35, Math.abs(this._dy) * 0.0020);
-        const scaleY = 1.0 + Math.min(0.35, Math.abs(this._dy) * 0.0020);
+        const scaleX = 1.0 - Math.min(0.35, Math.abs(this._dy) * 0.0025);
+        const scaleY = 1.0 + Math.min(0.35, Math.abs(this._dy) * 0.0025);
 
         // Traslación de inercia
-        const transX = -this._dx * 0.30;
-        const transY = -this._dy * 0.30;
+        const transX = -this._dx * 0.35;
+        const transY = -this._dy * 0.35;
 
-        actor.set_rotation_angle(Clutter.RotateAxis.Z_AXIS, rotZ);
-        actor.set_scale(scaleX, scaleY);
-        actor.set_translation(transX, transY, 0);
+        targetActor.set_rotation_angle(Clutter.RotateAxis.Z_AXIS, rotZ);
+        targetActor.set_scale(scaleX, scaleY);
+        targetActor.set_translation(transX, transY, 0);
 
         actor.queue_redraw();
     }
@@ -137,9 +134,10 @@ class WobblyEffect extends Clutter.Effect {
         }
         const actor = this.get_actor();
         if (actor) {
-            actor.set_rotation_angle(Clutter.RotateAxis.Z_AXIS, 0);
-            actor.set_scale(1.0, 1.0);
-            actor.set_translation(0, 0, 0);
+            const targetActor = actor.first_child || actor;
+            targetActor.set_rotation_angle(Clutter.RotateAxis.Z_AXIS, 0);
+            targetActor.set_scale(1.0, 1.0);
+            targetActor.set_translation(0, 0, 0);
         }
         super.run_dispose?.();
     }
@@ -318,16 +316,6 @@ export default class CompizExtension extends Extension {
             const windowId = metaWindow.get_id();
             if (this._windowActors.has(windowId)) return GLib.SOURCE_REMOVE;
 
-            // Escuchar movimiento continuo de la ventana para Wobbly
-            const posId = metaWindow.connect('position-changed', (win) => {
-                const entry = this._windowActors.get(windowId);
-                if (entry && entry.wobblyEffect) {
-                    const rect = win.get_frame_rect();
-                    entry.wobblyEffect.onPositionChanged(rect.x, rect.y);
-                }
-            });
-
-            // Escuchar la destrucción de la ventana
             const destroyId = actor.connect('destroy', () => {
                 this._onWindowDestroyed(windowId);
             });
@@ -337,7 +325,6 @@ export default class CompizExtension extends Extension {
                 metaWindow,
                 waterEffect: null,
                 wobblyEffect: null,
-                posId,
                 destroyId
             };
             this._windowActors.set(windowId, entry);
@@ -399,9 +386,6 @@ export default class CompizExtension extends Extension {
 
     _cleanupWindowEntry(entry) {
         try {
-            if (entry.metaWindow && entry.posId) {
-                entry.metaWindow.disconnect(entry.posId);
-            }
             if (entry.actor && entry.destroyId) {
                 entry.actor.disconnect(entry.destroyId);
             }
@@ -428,33 +412,28 @@ export default class CompizExtension extends Extension {
             return Clutter.EVENT_PROPAGATE;
         }
 
-        if (type !== Clutter.EventType.BUTTON_PRESS &&
-            type !== Clutter.EventType.TOUCH_BEGIN) {
-            return Clutter.EVENT_PROPAGATE;
+        if (type === Clutter.EventType.BUTTON_PRESS || type === Clutter.EventType.TOUCH_BEGIN) {
+            const [ex, ey] = event.get_coords();
+            const metaWindow = global.display.get_window_at_point?.(ex, ey) || global.display.focus_window;
+            if (metaWindow) {
+                const entry = this._windowActors.get(metaWindow.get_id());
+                if (entry && entry.wobblyEffect) {
+                    entry.wobblyEffect.onGrabBegin();
+                }
+
+                if (entry) {
+                    const [ax, ay] = [
+                        (ex - entry.actor.x) / entry.actor.width,
+                        (ey - entry.actor.y) / entry.actor.height,
+                    ];
+                    if (this._ipc) {
+                        this._ipc.sendWaterImpact(entry.metaWindow.get_id(), ax, ay, 1.0);
+                    }
+                    entry.waterEffect?.triggerImpact();
+                }
+            }
         }
 
-        const [ex, ey] = event.get_coords();
-        const metaWindow = global.display.get_window_at_point?.(ex, ey);
-        if (!metaWindow) return Clutter.EVENT_PROPAGATE;
-
-        const windowId = metaWindow.get_id();
-        const entry = this._windowActors.get(windowId);
-        if (!entry) return Clutter.EVENT_PROPAGATE;
-
-        if (entry.wobblyEffect) {
-            entry.wobblyEffect.onGrabBegin();
-        }
-
-        const [ax, ay] = [
-            (ex - entry.actor.x) / entry.actor.width,
-            (ey - entry.actor.y) / entry.actor.height,
-        ];
-
-        if (this._ipc) {
-            this._ipc.sendWaterImpact(windowId, ax, ay, 1.0);
-        }
-
-        entry.waterEffect?.triggerImpact();
         return Clutter.EVENT_PROPAGATE;
     }
 }
