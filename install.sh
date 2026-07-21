@@ -16,7 +16,7 @@ NC='\033[0m'
 
 CPU_CORES=$(nproc 2>/dev/null || echo 4)
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-EXT_UUID="compiz-gnome@esfingex"
+EXT_UUID="compiz-effects@esfingex.github.com"
 EXT_DEST="$HOME/.local/share/gnome-shell/extensions/$EXT_UUID"
 
 _ok()   { echo -e "${GREEN}✅ $*${NC}"; }
@@ -115,11 +115,9 @@ cp "$PROJECT_DIR/schemas/org.gnome.shell.extensions.compiz-gnome.gschema.xml" "$
 glib-compile-schemas "$EXT_DEST/schemas/"
 _ok "Esquema GSettings compilado."
 
-# Habilitar extensión
-if command -v gnome-extensions &>/dev/null; then
-    gnome-extensions enable "$EXT_UUID" 2>/dev/null || true
-    _ok "Extensión $EXT_UUID habilitada en GNOME Shell."
-fi
+# Habilitar extensión en dconf
+gsettings set org.gnome.shell enabled-extensions "$(gsettings get org.gnome.shell enabled-extensions | sed "s/]/, '$EXT_UUID']/")" 2>/dev/null || true
+_ok "Extensión $EXT_UUID agregada a la lista de extensiones habilitadas de GNOME Shell."
 
 # ─── PRUEBAS Y FINALIZACIÓN ───────────────────────────────────────────────────
 echo ""

@@ -9,8 +9,8 @@ CYAN='\033[0;36m'
 NC='\033[0m'
 
 SOCKET_PATH="/tmp/compiz_gnome_engine.sock"
-ENGINE_BIN="./build/compiz-engine-host"
-EXT_UUID="compiz-gnome@esfingex"
+ENGINE_BIN="./build_user/compiz_gnome_engine"
+EXT_UUID="compiz-effects@esfingex.github.com"
 EXT_DEST="$HOME/.local/share/gnome-shell/extensions/$EXT_UUID"
 
 PASS=0
@@ -30,16 +30,16 @@ echo ""
 
 # ─── TEST 1: Pruebas unitarias C++ automatizadas ──────────────────────────────
 echo -e "${CYAN}[1/8] Ejecutando pruebas unitarias C++...${NC}"
-mkdir -p build
-if g++ -std=c++20 tests/test_fixed_timestep.cpp -Isrc/core_cpp -o build/test_fixed_timestep 2>/dev/null &&
-   ./build/test_fixed_timestep >/dev/null 2>&1; then
+mkdir -p build_user
+if g++ -std=c++20 tests/test_fixed_timestep.cpp -Isrc/core_cpp -o build_user/test_fixed_timestep 2>/dev/null &&
+   ./build_user/test_fixed_timestep >/dev/null 2>&1; then
     _ok "test_fixed_timestep — Acumulación física 120Hz PASÓ"
 else
     _fail "test_fixed_timestep — FALLÓ"
 fi
 
-if g++ -std=c++20 tests/test_ipc_message.cpp -Isrc/core_cpp -o build/test_ipc_message 2>/dev/null &&
-   ./build/test_ipc_message >/dev/null 2>&1; then
+if g++ -std=c++20 tests/test_ipc_message.cpp -Isrc/core_cpp -o build_user/test_ipc_message 2>/dev/null &&
+   ./build_user/test_ipc_message >/dev/null 2>&1; then
     _ok "test_ipc_message — Serialización IPC Payload PASÓ"
 else
     _fail "test_ipc_message — FALLÓ"
@@ -50,8 +50,8 @@ if g++ -std=c++20 tests/test_new_effects.cpp \
        src/core_cpp/framegraph.cpp \
        src/core_cpp/passes/annotate_compute_pass.cpp \
        src/core_cpp/passes/showmouse_compute_pass.cpp \
-       -Isrc/core_cpp -lvulkan -o build/test_new_effects 2>/dev/null &&
-   ./build/test_new_effects >/dev/null 2>&1; then
+       -Isrc/core_cpp -lvulkan -o build_user/test_new_effects 2>/dev/null &&
+   ./build_user/test_new_effects >/dev/null 2>&1; then
     _ok "test_new_effects — API Annotate & Showmouse PASÓ"
 else
     _warn "test_new_effects — requiere libvulkan.so disponible"
