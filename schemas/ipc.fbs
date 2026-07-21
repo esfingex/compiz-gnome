@@ -7,16 +7,23 @@ enum EngineCmdType : ubyte {
     WaterImpact = 3,
     WaterConfig = 4,
     SyncFrame = 5,
-    ReleaseFrame = 6
+    ReleaseFrame = 6,
+    // Comandos extendidos
+    AnnotateStroke = 10,
+    AnnotateConfig = 11,
+    ShowmouseConfig = 12,
+    MagnifierConfig = 13,
+    GroupAction = 14,
+    WinrulesReload = 15,
+    ShowmousePosition = 16
 }
 
 table WindowMetadata {
     window_id: ulong;
     width: uint;
     height: uint;
-    drm_format: uint;
-    modifier: ulong;
-    scale_factor: float;
+    x: int;
+    y: int;
 }
 
 table WaterImpactPayload {
@@ -26,8 +33,14 @@ table WaterImpactPayload {
     strength: float;
 }
 
+table WaterConfigPayload {
+    speed: float;
+    fade: float;
+}
+
 table SyncFramePayload {
     window_id: ulong;
+    dmabuf_fd: int;
     timeline_value: ulong;
 }
 
@@ -36,11 +49,69 @@ table ReleaseFramePayload {
     timeline_value: ulong;
 }
 
+table AnnotateStrokePayload {
+    window_id: ulong;
+    x: float;
+    y: float;
+    pressure: float;
+    mode: ubyte; // 0=FIRE, 1=INK, 2=HIGHLIGHT, 3=ERASER
+    color_r: float;
+    color_g: float;
+    color_b: float;
+    color_a: float;
+}
+
+table AnnotateConfigPayload {
+    clear: bool;
+    mode: ubyte;
+    color_r: float;
+    color_g: float;
+    color_b: float;
+    color_a: float;
+    brush_size: float;
+}
+
+table ShowmouseConfigPayload {
+    effect_type: ubyte; // 0=RING, 1=SPARKLE, 2=TRAIL, 3=RIPPLE
+    ring_radius: float;
+    num_particles: uint;
+    color_r: float;
+    color_g: float;
+    color_b: float;
+    speed: float;
+}
+
+table MagnifierConfigPayload {
+    zoom_factor: float;
+    radius: float;
+    feather: float;
+    enabled: bool;
+}
+
+table GroupActionPayload {
+    action: ubyte; // 0=CREATE, 1=ADD, 2=REMOVE, 3=SWITCH
+    window_id: ulong;
+    group_id: uint;
+    target_window_id: ulong;
+}
+
+table ShowmousePositionPayload {
+    x: float;
+    y: float;
+}
+
 union EnginePayload {
     WindowMetadata,
     WaterImpactPayload,
+    WaterConfigPayload,
     SyncFramePayload,
-    ReleaseFramePayload
+    ReleaseFramePayload,
+    AnnotateStrokePayload,
+    AnnotateConfigPayload,
+    ShowmouseConfigPayload,
+    MagnifierConfigPayload,
+    GroupActionPayload,
+    ShowmousePositionPayload
 }
 
 table EngineMessage {

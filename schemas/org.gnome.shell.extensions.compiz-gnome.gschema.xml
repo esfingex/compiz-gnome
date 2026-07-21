@@ -45,17 +45,80 @@
       <description>Desenfoque de fondo multitap con computación GPU</description>
     </key>
 
-    <!-- ===== PARÁMETROS DE FÍSICA Y CALIDAD ===== -->
+    <!-- ===== ANNOTATE & PAINTFIRE ===== -->
+    <key name="annotate-enabled" type="b">
+      <default>true</default>
+      <summary>Habilitar Annotate &amp; Paintfire</summary>
+    </key>
+
+    <key name="annotate-mode" type="s">
+      <default>'ink'</default>
+      <summary>Modo de dibujo: fire, ink, highlight, eraser</summary>
+    </key>
+
+    <key name="annotate-brush-size" type="i">
+      <default>10</default>
+      <range min="1" max="100"/>
+      <summary>Tamaño del pincel</summary>
+    </key>
+
+    <!-- ===== SHOWMOUSE ===== -->
+    <key name="showmouse-enabled" type="b">
+      <default>true</default>
+      <summary>Habilitar Showmouse</summary>
+    </key>
+
+    <key name="showmouse-effect" type="s">
+      <default>'ring'</default>
+      <summary>Efecto de cursor: ring, sparkle, trail, ripple</summary>
+    </key>
+
+    <key name="showmouse-ring-radius" type="i">
+      <default>50</default>
+      <range min="10" max="200"/>
+      <summary>Radio del anillo</summary>
+    </key>
+
+    <key name="showmouse-num-particles" type="i">
+      <default>512</default>
+      <range min="64" max="2048"/>
+      <summary>Cantidad de partículas</summary>
+    </key>
+
+    <!-- ===== MAGNIFIER ===== -->
+    <key name="magnifier-enabled" type="b">
+      <default>false</default>
+      <summary>Habilitar Magnifier</summary>
+    </key>
+
+    <key name="magnifier-zoom" type="d">
+      <default>2.0</default>
+      <range min="1.0" max="10.0"/>
+      <summary>Factor de zoom</summary>
+    </key>
+
+    <key name="magnifier-radius" type="i">
+      <default>150</default>
+      <range min="50" max="500"/>
+      <summary>Radio de la lupa</summary>
+    </key>
+
+    <!-- ===== GROUP ===== -->
+    <key name="group-enabled" type="b">
+      <default>true</default>
+      <summary>Habilitar Group (agrupación de ventanas)</summary>
+    </key>
+
+    <key name="group-shortcut" type="s">
+      <default>'&lt;Super&gt;g'</default>
+      <summary>Atajo para agrupar ventanas</summary>
+    </key>
+
+    <!-- ===== PARÁMETROS DE FÍSICA ===== -->
     <key name="water-speed" type="d">
       <default>0.5</default>
       <range min="0.1" max="2.0"/>
       <summary>Velocidad de propagación de ondas de agua</summary>
-    </key>
-
-    <key name="water-fade" type="d">
-      <default>0.995</default>
-      <range min="0.95" max="0.999"/>
-      <summary>Factor de decaimiento de ondas de agua</summary>
     </key>
 
     <key name="wobbly-spring-k" type="d">
@@ -64,34 +127,16 @@
       <summary>Constante de rigidez de resortes para Wobbly</summary>
     </key>
 
-    <key name="wobbly-friction" type="d">
-      <default>0.8</default>
-      <range min="0.1" max="1.0"/>
-      <summary>Amortiguamiento de oscilaciones Wobbly</summary>
-    </key>
-
     <key name="burn-particles" type="i">
       <default>50000</default>
       <range min="1000" max="100000"/>
       <summary>Cantidad de partículas de fuego</summary>
     </key>
 
-    <key name="burn-speed" type="d">
-      <default>1.0</default>
-      <range min="0.1" max="3.0"/>
-      <summary>Velocidad de combustión</summary>
-    </key>
-
     <key name="blur-radius" type="i">
       <default>15</default>
       <range min="1" max="50"/>
       <summary>Radio de desenfoque en píxeles</summary>
-    </key>
-
-    <key name="blur-iterations" type="i">
-      <default>3</default>
-      <range min="1" max="8"/>
-      <summary>Iteraciones de Kawase blur</summary>
     </key>
 
     <!-- ===== ATAJOS DE TECLADO ===== -->

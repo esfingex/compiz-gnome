@@ -24,7 +24,7 @@ _info() { echo -e "${CYAN}ℹ️  $*${NC}"; }
 
 echo ""
 echo -e "${CYAN}╔══════════════════════════════════════════════╗"
-echo -e "║  compiz-gnome Integration Test Suite v0.2   ║"
+echo -e "║  compiz-gnome Integration Test Suite v0.3   ║"
 echo -e "╚══════════════════════════════════════════════╝${NC}"
 echo ""
 
@@ -43,6 +43,18 @@ if g++ -std=c++20 tests/test_ipc_message.cpp -Isrc/core_cpp -o build/test_ipc_me
     _ok "test_ipc_message — Serialización IPC Payload PASÓ"
 else
     _fail "test_ipc_message — FALLÓ"
+fi
+
+if g++ -std=c++20 tests/test_new_effects.cpp \
+       src/core_cpp/vulkan_context.cpp \
+       src/core_cpp/framegraph.cpp \
+       src/core_cpp/passes/annotate_compute_pass.cpp \
+       src/core_cpp/passes/showmouse_compute_pass.cpp \
+       -Isrc/core_cpp -lvulkan -o build/test_new_effects 2>/dev/null &&
+   ./build/test_new_effects >/dev/null 2>&1; then
+    _ok "test_new_effects — API Annotate & Showmouse PASÓ"
+else
+    _warn "test_new_effects — requiere libvulkan.so disponible"
 fi
 
 # ─── TEST 2: Compilación del motor ───────────────────────────────────────────
@@ -71,7 +83,7 @@ else
     _warn "vulkaninfo no disponible — prueba de GPU omitida"
 fi
 
-# ─── TEST 4: Extensión GNOME Shell & Prefs UI ────────────────────────────────
+# ─── TEST 4: Extensión GNOME Shell & UI Prefs ────────────────────────────────
 echo -e "${CYAN}[4/8] Verificando extensión GNOME Shell & UI Prefs...${NC}"
 if [ -d "src/gnome_extension" ]; then
     mkdir -p "$EXT_DEST"
