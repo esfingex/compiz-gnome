@@ -12,23 +12,46 @@ layout(set = 0, binding = 1) buffer SpringRest {
     vec4 restPositions[];
 } rest;
 
-// Push Constants (actualizado cada frame via vkCmdPushConstants)
-layout(push_constant) uniform WobblyPushConstants {
-    float springK;     // Constante elastica (N/m) — tipico: 2.0
-    float friction;    // Coeficiente de amortiguamiento — tipico: 0.8
-    float mass;        // Masa de cada vertice — tipico: 1.0
-    float dt;          // Paso de tiempo fijo: 1/120
+// Binding 2: Parametros fisicos (actualizados desde C++ cada frame)
+layout(set = 0, binding = 2) buffer SpringParams {
+    float springK;
+    float friction;
+    float mass;
+    float dt;
     uint  gridWidth;
     uint  gridHeight;
+    float damping;     // Factor multiplicativo de amortiguamiento (< 1.0)
+    float windForce;   // Fuerza de viento aleatoria (0.0 = sin viento)
+} params;
+
+// Push Constants: fuerza del arrastre del cursor (actualizado por IPC)
+layout(push_constant) uniform WobblyConstants {
+    uint  windowId;
+    float forceX;       // Posicion X del cursor en pixels de ventana
+    float forceY;       // Posicion Y del cursor en pixels de ventana
+    float forceStrength;// Magnitud del impulso [0,1]
 } pc;
 
 // LDS: 8x8 tiles + halo 1 pixel en cada borde = 10x10
 shared vec2 tilePos[10][10];
 
+uint hash_u(uint x) {
+    x = (x ^ 61u) ^ (x >> 16u);
+    x = x + (x << 3u);
+    x = x ^ (x >> 4u);
+    x = x * 0x27d4eb2du;
+    x = x ^ (x >> 15u);
+    return x;
+}
+
+float randFloat(uint seed) {
+    return float(hash_u(seed)) / 4294967295.0;
+}
+
 void main() {
     ivec2 gid = ivec2(gl_GlobalInvocationID.xy);
     ivec2 lid = ivec2(gl_LocalInvocationID.xy);
-    ivec2 dim = ivec2(pc.gridWidth, pc.gridHeight);
+    ivec2 dim = ivec2(params.gridWidth, params.gridHeight);
 
     if (gid.x >= dim.x || gid.y >= dim.y) return;
 
@@ -36,41 +59,54 @@ void main() {
     for (int dy = -1; dy <= 1; dy++) {
         for (int dx = -1; dx <= 1; dx++) {
             ivec2 loadPos = clamp(gid + ivec2(dx, dy), ivec2(0), dim - 1);
-            uint  idx     = uint(loadPos.y) * pc.gridWidth + uint(loadPos.x);
+            uint  idx     = uint(loadPos.y) * params.gridWidth + uint(loadPos.x);
             tilePos[lid.y + 1 + dy][lid.x + 1 + dx] = grid.positions[idx].xy;
         }
     }
     barrier();
 
-    uint idx   = uint(gid.y) * pc.gridWidth + uint(gid.x);
+    uint idx   = uint(gid.y) * params.gridWidth + uint(gid.x);
     vec2 pos   = grid.positions[idx].xy;
     vec2 vel   = grid.positions[idx].zw;
     vec2 rpos  = rest.restPositions[idx].xy;
 
-    // Acumulacion de fuerzas de los 4 vecinos ortogonales (Ley de Hooke)
+    // Fuerzas de resortes (Ley de Hooke) con 4 vecinos ortogonales
     vec2 force = vec2(0.0);
     const ivec2 offsets[4] = ivec2[4](ivec2(-1,0), ivec2(1,0), ivec2(0,-1), ivec2(0,1));
 
     for (int i = 0; i < 4; i++) {
         ivec2 nCoord = gid + offsets[i];
         if (nCoord.x >= 0 && nCoord.x < dim.x && nCoord.y >= 0 && nCoord.y < dim.y) {
-            // Leer desde LDS (mas rapido que releer del buffer global)
             vec2 nPos  = tilePos[lid.y + 1 + offsets[i].y][lid.x + 1 + offsets[i].x];
-            uint nIdx  = uint(nCoord.y) * pc.gridWidth + uint(nCoord.x);
+            uint nIdx  = uint(nCoord.y) * params.gridWidth + uint(nCoord.x);
             vec2 nRest = rest.restPositions[nIdx].xy;
-            // Elongacion del resorte respecto al estado de reposo
             vec2 delta = (nPos - pos) - (nRest - rpos);
-            force += pc.springK * delta * 0.5;
+            force += params.springK * delta * 0.5;
         }
     }
 
-    // Amortiguamiento viscoso: F_damp = -c * v
-    force -= pc.friction * vel;
+    // Fuerza externa: radio de influencia 50px alrededor del cursor
+    if (pc.forceStrength > 0.0) {
+        vec2 dir  = vec2(pc.forceX, pc.forceY) - pos;
+        float dist = length(dir);
+        if (dist < 50.0 && dist > 0.001) {
+            float falloff = 1.0 - dist / 50.0;
+            force += normalize(dir) * pc.forceStrength * falloff * 500.0;
+        }
+    }
 
-    // Integracion de Verlet semi-implicita (estable para resortes rigidos)
-    vec2 accel  = force / pc.mass;
-    vec2 newVel = vel + accel * pc.dt;
-    vec2 newPos = pos + newVel * pc.dt;
+    // Amortiguamiento viscoso + perturbacion de viento
+    force -= params.friction * vel;
+    if (params.windForce > 0.0) {
+        uint seed = idx ^ uint(gl_GlobalInvocationID.x * 7919u);
+        force += vec2(randFloat(seed)     - 0.5,
+                      randFloat(seed + 1u) - 0.5) * params.windForce;
+    }
+
+    // Integracion de Verlet semi-implicita + damping global
+    vec2 accel  = force / params.mass;
+    vec2 newVel = (vel + accel * params.dt) * params.damping;
+    vec2 newPos = pos + newVel * params.dt;
 
     grid.positions[idx] = vec4(newPos, newVel);
 }

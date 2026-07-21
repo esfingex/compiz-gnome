@@ -1,0 +1,98 @@
+#version 460
+layout(local_size_x = 256) in;
+
+// Layout de la particula en GPU (coincide con el struct C++)
+// 64 bytes por particula = 16 vec4s = cache-friendly
+struct Particle {
+    vec2  position;   //  8 bytes
+    vec2  velocity;   //  8 bytes
+    float life;       //  4 bytes
+    float maxLife;    //  4 bytes
+    vec3  color;      // 12 bytes
+    float size;       //  4 bytes
+                      // --- 40 bytes (rellenado hasta 48 por std430)
+    float _pad0;
+    float _pad1;
+};
+
+layout(std430, set = 0, binding = 0) buffer ParticleBuffer {
+    Particle particles[];
+};
+
+layout(set = 0, binding = 1) uniform BurnParams {
+    float progress;      // [0,1] fraccion de pantalla quemada
+    float dt;
+    float emissionRate;
+    float fadeSpeed;
+    vec2  windowSize;    // Tamano de la ventana en pixels
+    vec2  cursorPos;     // Posicion del cursor (firepaint manual)
+    float burnWidth;     // Ancho de la linea de fuego en pixels
+    float windSpeed;     // Fuerza del viento horizontal
+} params;
+
+layout(push_constant) uniform BurnConstants {
+    uint  particleCount;
+    float time;          // Tiempo acumulado (para hash deterministico)
+} pc;
+
+// Hash PCG32 para aleatoriedad de alta calidad sin texturas
+uint pcg32(inout uint state) {
+    uint prev = state * 747796405u + 2891336453u;
+    uint word = ((prev >> ((prev >> 28u) + 4u)) ^ prev) * 277803737u;
+    state = prev;
+    return (word >> 22u) ^ word;
+}
+
+float rng(inout uint state) {
+    return float(pcg32(state)) / 4294967295.0;
+}
+
+void resetParticle(uint idx, inout Particle p, uint seed) {
+    uint rstate = seed ^ (idx * 2654435761u);
+
+    float fireY = params.windowSize.y * (1.0 - params.progress);
+    float fireX = params.windowSize.x * rng(rstate);
+
+    p.position = vec2(fireX, fireY + rng(rstate) * params.burnWidth);
+    p.velocity = vec2((rng(rstate) - 0.5) * 60.0,
+                      -(40.0 + rng(rstate) * 80.0));
+    p.life     = 0.6 + rng(rstate) * 0.8;
+    p.maxLife  = p.life;
+    p.size     = 4.0 + rng(rstate) * 14.0;
+    p.color    = vec3(1.0, 0.55 + rng(rstate) * 0.3, 0.05);
+}
+
+void main() {
+    uint idx = gl_GlobalInvocationID.x;
+    if (idx >= pc.particleCount) return;
+
+    Particle p = particles[idx];
+
+    if (p.life > 0.0) {
+        // Gravedad invertida + viento lateral
+        p.velocity += vec2(params.windSpeed, -1.5) * params.dt;
+        p.position += p.velocity * params.dt;
+
+        // Decaimiento de vida
+        p.life -= params.fadeSpeed * params.dt;
+        p.size = max(0.1, p.size * (1.0 - 0.5 * params.dt));
+
+        // Gradiente de color por temperatura (vida / maxLife)
+        float t = clamp(p.life / max(p.maxLife, 0.001), 0.0, 1.0);
+        // Plasma: negro → rojo → naranja → amarillo → blanco
+        p.color = mix(vec3(0.05, 0.01, 0.0),
+                  mix(vec3(0.9,  0.2,  0.0),
+                  mix(vec3(1.0,  0.7,  0.1),
+                      vec3(1.0,  1.0,  0.9), t), t), t);
+
+        if (p.life <= 0.0) {
+            uint seed = uint(pc.time * 1000.0) + idx;
+            resetParticle(idx, p, seed);
+        }
+    } else {
+        uint seed = uint(pc.time * 1000.0) + idx;
+        resetParticle(idx, p, seed);
+    }
+
+    particles[idx] = p;
+}

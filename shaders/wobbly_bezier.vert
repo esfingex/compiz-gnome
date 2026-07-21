@@ -1,67 +1,83 @@
 #version 460
 
-// Entrada del buffer de posiciones de la grilla de resortes (compute-generated)
 layout(set = 0, binding = 0) buffer SpringGrid {
-    vec4 positions[];   // x,y = posicion actual del vertice (NDC), z,w = velocidad
+    vec4 positions[];   // x,y = posicion actual, z,w = velocidad
 } grid;
 
-// Push constants compartidos con el compute pass
-layout(push_constant) uniform WobblyVertexConstants {
+layout(push_constant) uniform WobblyRenderConstants {
     uint  gridWidth;
     uint  gridHeight;
-    float scaleX;       // 2.0 / screenWidth
-    float scaleY;       // 2.0 / screenHeight
-    float originX;      // X esquina superior izq de la ventana (pixels)
-    float originY;      // Y esquina superior izq de la ventana (pixels)
+    float scaleX;           // 2.0 / screenWidth
+    float scaleY;           // 2.0 / screenHeight
+    float textureWidth;     // Ancho de la ventana en pixels
+    float textureHeight;    // Alto de la ventana en pixels
+    float originX;          // X esquina superior izquierda en pixels
+    float originY;          // Y esquina superior izquierda en pixels
 } pc;
 
-layout(location = 0) in vec2 inUV;   // Coordenadas UV normalizadas [0,1]
+layout(location = 0) in  vec2 inUV;
 layout(location = 0) out vec2 vUV;
+layout(location = 1) out vec3 vNormal;
 
-// Evaluacion de polinomio de Bernstein para Bezier cubica
-// t in [0,1], i in {0,1,2,3}
-float bernstein(int i, float t) {
-    float t2 = t * t;
-    float t3 = t2 * t;
-    float mt = 1.0 - t;
-    float mt2 = mt * mt;
-    float mt3 = mt2 * mt;
-    if (i == 0) return mt3;
-    if (i == 1) return 3.0 * mt2 * t;
-    if (i == 2) return 3.0 * mt  * t2;
-    return t3;
-}
+// Polinomios de Bernstein para Bezier cubica
+float B0(float t) { float m = 1.0 - t; return m * m * m; }
+float B1(float t) { float m = 1.0 - t; return 3.0 * t * m * m; }
+float B2(float t) { float m = 1.0 - t; return 3.0 * t * t * m; }
+float B3(float t) { return t * t * t; }
+
+// Derivadas de los polinomios de Bernstein
+float dB0(float t) { float m = 1.0 - t; return -3.0 * m * m; }
+float dB1(float t) { float m = 1.0 - t; return 3.0 * m * m - 6.0 * t * m; }
+float dB2(float t) { float m = 1.0 - t; return 6.0 * t * m - 3.0 * t * t; }
+float dB3(float t) { return 3.0 * t * t; }
+
+vec2 evalBernstein(float t) { return vec2(B0(t), dB0(t)); }
 
 void main() {
     vUV = inUV;
 
     // Mapear UV a coordenada continua en la grilla
-    float cellX = inUV.x * float(pc.gridWidth  - 1);
-    float cellY = inUV.y * float(pc.gridHeight - 1);
-    int   ix    = clamp(int(floor(cellX)), 0, int(pc.gridWidth)  - 2);
-    int   iy    = clamp(int(floor(cellY)), 0, int(pc.gridHeight) - 2);
-    float fx    = fract(cellX);
-    float fy    = fract(cellY);
+    float cellU = inUV.x * float(pc.gridWidth  - 1);
+    float cellV = inUV.y * float(pc.gridHeight - 1);
+    int   ix    = clamp(int(floor(cellU)), 0, int(pc.gridWidth)  - 2);
+    int   iy    = clamp(int(floor(cellV)), 0, int(pc.gridHeight) - 2);
+    float fx    = fract(cellU);
+    float fy    = fract(cellV);
 
-    // Interpolacion bilineal entre los 4 vertices de la celda (GL_NICEST alternativa
-    // a la Bezier bicubica completa que requiere 4x4=16 samples y es mas cara)
-    uint i00 = uint(iy)     * pc.gridWidth + uint(ix);
-    uint i10 = uint(iy)     * pc.gridWidth + uint(ix + 1);
-    uint i01 = uint(iy + 1) * pc.gridWidth + uint(ix);
-    uint i11 = uint(iy + 1) * pc.gridWidth + uint(ix + 1);
+    // Evaluar Bezier bicubica usando 4x4 puntos de control
+    float Bu[4]  = float[4](B0(fx), B1(fx), B2(fx), B3(fx));
+    float Bv[4]  = float[4](B0(fy), B1(fy), B2(fy), B3(fy));
+    float dBu[4] = float[4](dB0(fx), dB1(fx), dB2(fx), dB3(fx));
+    float dBv[4] = float[4](dB0(fy), dB1(fy), dB2(fy), dB3(fy));
 
-    vec2 p00 = grid.positions[i00].xy;
-    vec2 p10 = grid.positions[i10].xy;
-    vec2 p01 = grid.positions[i01].xy;
-    vec2 p11 = grid.positions[i11].xy;
+    vec2 pos = vec2(0.0);
+    vec2 du  = vec2(0.0); // Derivada parcial en U (tangente horizontal)
+    vec2 dv  = vec2(0.0); // Derivada parcial en V (tangente vertical)
 
-    // Interpolacion bilineal suave (equivalente a Bezier grado 1, suficiente para 32x32)
-    vec2 pos = mix(mix(p00, p10, fx), mix(p01, p11, fx), fy);
+    for (int j = 0; j < 4; j++) {
+        int jj = clamp(iy + j - 1, 0, int(pc.gridHeight) - 1);
+        for (int i = 0; i < 4; i++) {
+            int ii  = clamp(ix + i - 1, 0, int(pc.gridWidth) - 1);
+            uint gi = uint(jj) * pc.gridWidth + uint(ii);
+            vec2 P  = grid.positions[gi].xy;
 
-    // Transformar de espacio de ventana (pixels) a NDC [-1,1]
-    // pos ya contiene la posicion en pixels desde el origen de la ventana
-    float ndcX = (pos.x + pc.originX) * pc.scaleX - 1.0;
-    float ndcY = 1.0 - (pos.y + pc.originY) * pc.scaleY; // Y invertida en NDC
+            float w = Bu[i] * Bv[j];
+            pos += P * w;
+            du  += P * (dBu[i] * Bv[j]);
+            dv  += P * (Bu[i]  * dBv[j]);
+        }
+    }
+
+    // Normal de la superficie (cross product de las tangentes + eje Z fijo)
+    vec3 T_u = vec3(du, 0.0);
+    vec3 T_v = vec3(dv, 0.0);
+    // Como la malla es 2D, el normal siempre apunta hacia +Z pero lo perturbamos
+    // con la curvatura de la deformacion para shading correcto
+    vNormal = normalize(cross(T_u, vec3(0.0, 0.0, 1.0)) + cross(vec3(0.0, 0.0, 1.0), T_v) + vec3(0.0, 0.0, 1.0));
+
+    // Transformar de espacio de ventana (pixels) a NDC [-1, 1]
+    float ndcX =  (pos.x + pc.originX) * pc.scaleX - 1.0;
+    float ndcY = -(pos.y + pc.originY) * pc.scaleY + 1.0; // Y invertida
 
     gl_Position = vec4(ndcX, ndcY, 0.0, 1.0);
 }
