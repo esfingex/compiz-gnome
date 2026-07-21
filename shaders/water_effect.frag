@@ -2,7 +2,7 @@
 
 layout(location = 0) out vec4 outColor;
 
-in vec2 vUV;
+layout(location = 0) in vec2 vUV;
 
 layout(set = 0, binding = 0) uniform sampler2D u_normalMap;     // Normal XY + Height(A)
 layout(set = 0, binding = 1) uniform sampler2D u_windowTexture; // Textura de la ventana (DMA-BUF)

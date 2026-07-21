@@ -1,0 +1,33 @@
+#version 460
+layout(local_size_x = 16, local_size_y = 16) in;
+
+// Dual Kawase Blur — Downsample Pass
+// Reduce la imagen a la mitad del tamano con kernel de 5 taps pesado.
+// Se aplica en N iteraciones para radio de blur creciente (N = log2(radius)).
+
+layout(set = 0, binding = 0, rgba16f) uniform readonly  image2D srcImage;
+layout(set = 0, binding = 1, rgba16f) uniform writeonly image2D dstImage;
+
+layout(push_constant) uniform KawaseDownConstants {
+    float offset;   // Desplazamiento del kernel (crece por iteracion: 0.5, 1.5, 2.5...)
+} pc;
+
+void main() {
+    ivec2 dstPos  = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 dstSize = imageSize(dstImage);
+    if (dstPos.x >= dstSize.x || dstPos.y >= dstSize.y) return;
+
+    // Centro en el espacio del src (2x mas grande que dst)
+    ivec2 center = dstPos * 2;
+
+    // Kernel de 5 taps: centro * 4.0 + 4 diagonales * 1.0 = 8.0 total
+    vec4 sum = imageLoad(srcImage, center) * 4.0;
+
+    int o = int(pc.offset);
+    sum += imageLoad(srcImage, center + ivec2(-o, -o));
+    sum += imageLoad(srcImage, center + ivec2( o, -o));
+    sum += imageLoad(srcImage, center + ivec2(-o,  o));
+    sum += imageLoad(srcImage, center + ivec2( o,  o));
+
+    imageStore(dstImage, dstPos, sum * 0.125);
+}

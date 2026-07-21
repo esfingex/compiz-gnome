@@ -1,0 +1,76 @@
+#version 460
+
+layout(local_size_x = 8, local_size_y = 8) in;
+
+// Binding 0: Grid buffer — posicion actual (xy) + velocidad (zw) por vertice
+layout(set = 0, binding = 0) buffer SpringGrid {
+    vec4 positions[];
+} grid;
+
+// Binding 1: Posiciones de reposo (layout en cuadricula uniforme)
+layout(set = 0, binding = 1) buffer SpringRest {
+    vec4 restPositions[];
+} rest;
+
+// Push Constants (actualizado cada frame via vkCmdPushConstants)
+layout(push_constant) uniform WobblyPushConstants {
+    float springK;     // Constante elastica (N/m) — tipico: 2.0
+    float friction;    // Coeficiente de amortiguamiento — tipico: 0.8
+    float mass;        // Masa de cada vertice — tipico: 1.0
+    float dt;          // Paso de tiempo fijo: 1/120
+    uint  gridWidth;
+    uint  gridHeight;
+} pc;
+
+// LDS: 8x8 tiles + halo 1 pixel en cada borde = 10x10
+shared vec2 tilePos[10][10];
+
+void main() {
+    ivec2 gid = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 lid = ivec2(gl_LocalInvocationID.xy);
+    ivec2 dim = ivec2(pc.gridWidth, pc.gridHeight);
+
+    if (gid.x >= dim.x || gid.y >= dim.y) return;
+
+    // Carga cooperativa en LDS con halo de 1 pixel
+    for (int dy = -1; dy <= 1; dy++) {
+        for (int dx = -1; dx <= 1; dx++) {
+            ivec2 loadPos = clamp(gid + ivec2(dx, dy), ivec2(0), dim - 1);
+            uint  idx     = uint(loadPos.y) * pc.gridWidth + uint(loadPos.x);
+            tilePos[lid.y + 1 + dy][lid.x + 1 + dx] = grid.positions[idx].xy;
+        }
+    }
+    barrier();
+
+    uint idx   = uint(gid.y) * pc.gridWidth + uint(gid.x);
+    vec2 pos   = grid.positions[idx].xy;
+    vec2 vel   = grid.positions[idx].zw;
+    vec2 rpos  = rest.restPositions[idx].xy;
+
+    // Acumulacion de fuerzas de los 4 vecinos ortogonales (Ley de Hooke)
+    vec2 force = vec2(0.0);
+    const ivec2 offsets[4] = ivec2[4](ivec2(-1,0), ivec2(1,0), ivec2(0,-1), ivec2(0,1));
+
+    for (int i = 0; i < 4; i++) {
+        ivec2 nCoord = gid + offsets[i];
+        if (nCoord.x >= 0 && nCoord.x < dim.x && nCoord.y >= 0 && nCoord.y < dim.y) {
+            // Leer desde LDS (mas rapido que releer del buffer global)
+            vec2 nPos  = tilePos[lid.y + 1 + offsets[i].y][lid.x + 1 + offsets[i].x];
+            uint nIdx  = uint(nCoord.y) * pc.gridWidth + uint(nCoord.x);
+            vec2 nRest = rest.restPositions[nIdx].xy;
+            // Elongacion del resorte respecto al estado de reposo
+            vec2 delta = (nPos - pos) - (nRest - rpos);
+            force += pc.springK * delta * 0.5;
+        }
+    }
+
+    // Amortiguamiento viscoso: F_damp = -c * v
+    force -= pc.friction * vel;
+
+    // Integracion de Verlet semi-implicita (estable para resortes rigidos)
+    vec2 accel  = force / pc.mass;
+    vec2 newVel = vel + accel * pc.dt;
+    vec2 newPos = pos + newVel * pc.dt;
+
+    grid.positions[idx] = vec4(newPos, newVel);
+}
