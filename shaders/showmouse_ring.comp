@@ -1,0 +1,111 @@
+#version 460
+
+layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
+
+struct Particle {
+    vec2  position;
+    vec2  velocity;
+    float life;
+    float maxLife;
+    vec4  color;
+    float size;
+    float angle;
+    float angularVelocity;
+};
+
+layout(std430, set = 0, binding = 0) buffer ParticleBuffer {
+    Particle particles[];
+};
+
+layout(push_constant) uniform ShowmouseConstants {
+    vec2  cursorPos;
+    float ringRadius;
+    float time;
+    float deltaTime;
+    uint  effectType; // 0=RING, 1=SPARKLE, 2=TRAIL, 3=RIPPLE
+    uint  numParticles;
+} pc;
+
+uint hash(uint x) {
+    x = (x ^ 61u) ^ (x >> 16u);
+    x = x + (x << 3u);
+    x = x ^ (x >> 4u);
+    x = x * 0x27d4eb2du;
+    x = x ^ (x >> 15u);
+    return x;
+}
+
+float random(uint seed) {
+    return float(hash(seed)) / 4294967295.0;
+}
+
+void main() {
+    uint idx = gl_GlobalInvocationID.x;
+    if (idx >= pc.numParticles) return;
+
+    Particle p = particles[idx];
+
+    switch (pc.effectType) {
+        case 0u: { // RING - Anillo brillante giratorio
+            if (p.life <= 0.0 || p.life >= p.maxLife) {
+                float angle = random(idx + uint(pc.time * 1000.0)) * 6.28318;
+                float r     = pc.ringRadius * (0.8 + random(idx + uint(pc.time * 1000.0) + 1u) * 0.2);
+                p.position  = pc.cursorPos + vec2(cos(angle), sin(angle)) * r;
+                p.velocity  = vec2(0.0);
+                p.life      = 0.5 + random(idx + uint(pc.time * 1000.0) + 2u) * 1.5;
+                p.maxLife   = p.life;
+                p.size      = 2.0 + random(idx + uint(pc.time * 1000.0) + 3u) * 4.0;
+                p.angle     = angle;
+                p.angularVelocity = (random(idx + uint(pc.time * 1000.0) + 4u) - 0.5) * 4.0;
+                p.color     = vec4(1.0, 0.8, 0.3, 1.0);
+            }
+            p.angle += p.angularVelocity * pc.deltaTime;
+            float r  = pc.ringRadius * (0.8 + 0.2 * (1.0 - p.life / p.maxLife));
+            p.position = pc.cursorPos + vec2(cos(p.angle), sin(p.angle)) * r;
+            p.life   -= pc.deltaTime;
+            p.color.a = clamp(p.life / p.maxLife, 0.0, 1.0);
+            break;
+        }
+
+        case 1u: { // SPARKLE - Chispas explosivas
+            if (p.life <= 0.0) {
+                float angle = random(idx + uint(pc.time * 1000.0)) * 6.28318;
+                float speed = 50.0 + random(idx + uint(pc.time * 1000.0) + 1u) * 150.0;
+                p.position  = pc.cursorPos;
+                p.velocity  = vec2(cos(angle), sin(angle)) * speed;
+                p.life      = 0.5 + random(idx + uint(pc.time * 1000.0) + 2u) * 1.0;
+                p.maxLife   = p.life;
+                p.size      = 1.0 + random(idx + uint(pc.time * 1000.0) + 3u) * 3.0;
+                p.color     = vec4(1.0, 0.6 + random(idx + uint(pc.time * 1000.0) + 4u) * 0.4, 0.1, 1.0);
+            }
+            p.velocity *= 0.98;
+            p.position += p.velocity * pc.deltaTime;
+            p.life     -= pc.deltaTime;
+            p.color.a   = clamp(p.life / p.maxLife, 0.0, 1.0);
+            break;
+        }
+
+        case 2u: { // TRAIL - Estela del mouse
+            if (p.life <= 0.0) {
+                p.position = pc.cursorPos + vec2(
+                    (random(idx + uint(pc.time * 1000.0)) - 0.5) * 4.0,
+                    (random(idx + uint(pc.time * 1000.0) + 1u) - 0.5) * 4.0
+                );
+                p.velocity = vec2(0.0);
+                p.life     = 0.5 + random(idx + uint(pc.time * 1000.0) + 2u) * 1.5;
+                p.maxLife  = p.life;
+                p.size     = 3.0 + random(idx + uint(pc.time * 1000.0) + 3u) * 5.0;
+                p.color    = vec4(0.2, 0.6, 1.0, 0.8);
+            }
+            vec2 toCursor = pc.cursorPos - p.position;
+            p.velocity += toCursor * 0.05 * pc.deltaTime;
+            p.velocity *= 0.95;
+            p.position += p.velocity * pc.deltaTime;
+            p.life     -= pc.deltaTime;
+            p.color.a   = (p.life / p.maxLife) * 0.8;
+            break;
+        }
+    }
+
+    particles[idx] = p;
+}

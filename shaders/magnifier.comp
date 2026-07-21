@@ -1,0 +1,75 @@
+#version 460
+
+layout(local_size_x = 16, local_size_y = 16) in;
+
+layout(set = 0, binding = 0) uniform sampler2D srcTexture;
+layout(set = 0, binding = 1, rgba16f) uniform writeonly image2D dstImage;
+
+layout(push_constant) uniform MagnifierConstants {
+    vec2  center;       // Posicion del centro de la lupa en UV [0,1]
+    float radius;       // Radio de la lente en UV [0,1]
+    float zoomFactor;   // Factor de aumento (ej: 2.0x, 4.0x)
+    float feather;      // Ancho del borde suave en UV [0,1]
+} pc;
+
+float catmullRom(float t) {
+    float at = abs(t);
+    if (at <= 1.0) {
+        return 1.5 * at * at * at - 2.5 * at * at + 1.0;
+    } else if (at < 2.0) {
+        return -0.5 * at * at * at + 2.5 * at * at - 4.0 * at + 2.0;
+    }
+    return 0.0;
+}
+
+vec4 bicubicSample(sampler2D tex, vec2 uv) {
+    vec2 texSize = vec2(textureSize(tex, 0));
+    vec2 pixel   = uv * texSize - 0.5;
+    vec2 frac    = fract(pixel);
+    vec2 base    = floor(pixel);
+
+    vec4 result = vec4(0.0);
+    float weightSum = 0.0;
+
+    for (int y = -1; y <= 2; y++) {
+        for (int x = -1; x <= 2; x++) {
+            vec2 offset    = vec2(float(x), float(y));
+            vec2 samplePos = (base + offset + 0.5) / texSize;
+            float wx       = catmullRom(frac.x - float(x));
+            float wy       = catmullRom(frac.y - float(y));
+            float w        = wx * wy;
+
+            result += texture(tex, samplePos) * w;
+            weightSum += w;
+        }
+    }
+    return result / max(weightSum, 0.001);
+}
+
+void main() {
+    ivec2 gid = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 dim = imageSize(dstImage);
+    if (gid.x >= dim.x || gid.y >= dim.y) return;
+
+    vec2 uv    = vec2(gid) / vec2(dim);
+    vec2 delta = uv - pc.center;
+    float dist = length(delta);
+
+    float mask = 1.0 - smoothstep(pc.radius - pc.feather, pc.radius + pc.feather, dist);
+
+    if (mask > 0.001) {
+        vec2 zoomUv = pc.center + delta / pc.zoomFactor;
+        zoomUv = clamp(zoomUv, 0.0, 1.0);
+
+        vec4 zoomColor = bicubicSample(srcTexture, zoomUv);
+
+        // Borde azul brillante caracteristico de Compiz Magnifier
+        float border = smoothstep(pc.radius - pc.feather, pc.radius, dist);
+        vec3 borderColor = vec3(0.3, 0.6, 1.0);
+        zoomColor.rgb = mix(zoomColor.rgb, borderColor, border * 0.4);
+
+        imageStore(dstImage, gid, zoomColor);
+    } else {
+        imageStore(dstImage, gid, texture(srcTexture, uv));
+    }
+}
