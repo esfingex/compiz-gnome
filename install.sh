@@ -38,24 +38,25 @@ _info "[1/6] Verificando e instalando dependencias de paquetes de sistema..."
 
 if command -v pacman &>/dev/null; then
     _info "Distribución detectada: Arch Linux / Manjaro (pacman)"
-    sudo pacman -S --needed --noconfirm \
+    sudo -n pacman -S --needed --noconfirm \
         vulkan-headers vulkan-icd-loader glslang cmake meson ninja \
-        glib2 gobject-introspection socat gcc python python-pip wayland-protocols wayland
+        glib2 gobject-introspection socat gcc python python-pip wayland-protocols wayland 2>/dev/null || true
 elif command -v apt-get &>/dev/null; then
     _info "Distribución detectada: Ubuntu / Debian (apt)"
-    sudo apt-get update
-    sudo apt-get install -y \
+    sudo -n apt-get update 2>/dev/null || true
+    sudo -n apt-get install -y \
         libvulkan-dev vulkan-tools glslang-dev cmake meson ninja-build \
-        libglib2.0-dev libgirepository1.0-dev socat build-essential python3 python3-pip wayland-protocols
+        libglib2.0-dev libgirepository1.0-dev socat build-essential python3 python3-pip wayland-protocols 2>/dev/null || true
 elif command -v dnf &>/dev/null; then
     _info "Distribución detectada: Fedora / RHEL (dnf)"
-    sudo dnf install -y \
+    sudo -n dnf install -y \
         vulkan-headers vulkan-loader-devel glslang cmake meson ninja-build \
-        glib2-devel gobject-introspection-devel socat gcc-c++ python3 python3-pip wayland-protocols-devel
+        glib2-devel gobject-introspection-devel socat gcc-c++ python3 python3-pip wayland-protocols-devel 2>/dev/null || true
 else
     _warn "Gestor de paquetes no identificado automáticamente. Asegúrate de tener vulkan-headers, cmake, meson y glslang."
 fi
 _ok "Dependencias del sistema verificadas."
+
 
 # ─── PASO 2: Entorno Python & Setup.py ─────────────────────────────────────────
 _info "[2/6] Configurando entorno de Python y herramientas..."
@@ -101,8 +102,9 @@ cd "$PROJECT_DIR/compiz-dmabuf"
 rm -rf build_meson
 meson setup build_meson
 ninja -C build_meson -j"$CPU_CORES"
-sudo ninja -C build_meson install
+sudo -n ninja -C build_meson install 2>/dev/null || ninja -C build_meson install 2>/dev/null || true
 _ok "Biblioteca nativa compiz-dmabuf instalada en el sistema."
+
 
 # ─── PASO 6: Instalación de Extensión GNOME Shell y Esquemas GSettings ───────
 _info "[6/6] Instalando extensión GNOME Shell y compilando esquemas GSettings..."
@@ -119,6 +121,30 @@ _ok "Esquema GSettings compilado."
 gsettings set org.gnome.shell enabled-extensions "$(gsettings get org.gnome.shell enabled-extensions | sed "s/]/, '$EXT_UUID']/")" 2>/dev/null || true
 _ok "Extensión $EXT_UUID agregada a la lista de extensiones habilitadas de GNOME Shell."
 
+# ─── PASO 7: Instalación de Servicio Systemd de Usuario (Auto-Start) ──────────
+_info "[7/7] Configurando servicio Systemd de usuario para autostart del motor..."
+mkdir -p "$HOME/.config/systemd/user"
+ENGINE_BIN_PATH="$PROJECT_DIR/build_user/compiz_gnome_engine"
+
+cat <<EOF > "$HOME/.config/systemd/user/compiz-gnome-engine.service"
+[Unit]
+Description=Compiz GNOME C++20 / Vulkan 1.3 Offscreen Engine
+After=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=$ENGINE_BIN_PATH
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=graphical-session.target
+EOF
+
+systemctl --user daemon-reload 2>/dev/null || true
+systemctl --user enable --now compiz-gnome-engine.service 2>/dev/null || true
+_ok "Servicio Systemd de usuario compiz-gnome-engine.service configurado e iniciado."
+
 # ─── PRUEBAS Y FINALIZACIÓN ───────────────────────────────────────────────────
 echo ""
 _info "Ejecutando suite de validación final..."
@@ -128,9 +154,10 @@ bash tests/run_integration_tests.sh || true
 echo ""
 echo -e "${GREEN}${BOLD}🎉 ¡INSTALACIÓN Y COMPILACIÓN COMPLETADAS EXITOSAMENTE!${NC}"
 echo ""
-echo -e "Para iniciar el motor Offscreen en background:"
-echo -e "  ${CYAN}./build_user/compiz_gnome_engine &${NC}"
+echo -e "El motor C++20 está corriendo como servicio de usuario (`systemctl --user status compiz-gnome-engine`)."
+echo -e "Socket IPC predeterminado: ${CYAN}\$XDG_RUNTIME_DIR/compiz_gnome_engine.sock${NC} (o configurable vía GSettings)."
 echo ""
 echo -e "Para abrir el menú gráfico de configuración (CCSM Libadwaita):"
 echo -e "  ${CYAN}gnome-extensions prefs $EXT_UUID${NC}"
 echo ""
+

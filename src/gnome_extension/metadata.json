@@ -2,6 +2,7 @@
   "uuid": "compiz-effects@esfingex.github.com",
   "name": "Compiz Effects & Window Rules",
   "description": "Port moderno de los 88 plugins de Compiz a GNOME Shell 50+ mediante C++20 / Vulkan 1.3 Offscreen Engine y DMA-BUF Zero-Copy.",
+  "settings-schema": "org.gnome.shell.extensions.compiz-gnome",
   "shell-version": [
     "45",
     "46",

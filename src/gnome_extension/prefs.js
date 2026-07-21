@@ -5,24 +5,25 @@ import { ExtensionPreferences, gettext as _ } from 'resource:///org/gnome/Shell/
 import Adw from 'gi://Adw';
 import Gtk from 'gi://Gtk';
 import Gio from 'gi://Gio';
+import GLib from 'gi://GLib';
 
 export default class CompizPreferences extends ExtensionPreferences {
     fillPreferencesWindow(window) {
-        const settings = this.getSettings();
+        const settings = this.getSettings('org.gnome.shell.extensions.compiz-gnome');
 
-        // ─── PÁGINA PRINCIPAL ───────────────────────────────────────────────────
-        const page = new Adw.PreferencesPage({
-            title: _('Compiz Effects'),
+        // ─── TAB 1: EFECTOS VISUALES ──────────────────────────────────────────
+        const effectsPage = new Adw.PreferencesPage({
+            title: _('Efectos Visuales'),
             icon_name: 'preferences-desktop-effects-symbolic'
         });
-        window.add(page);
+        window.add(effectsPage);
 
-        // ─── SECCIÓN: EFECTOS PRINCIPALES ──────────────────────────────────────
+        // SECCIÓN: EFECTOS PRINCIPALES
         const generalGroup = new Adw.PreferencesGroup({
             title: _('Efectos Principales'),
             description: _('Activa o desactiva los efectos gráficos Vulkan 1.3')
         });
-        page.add(generalGroup);
+        effectsPage.add(generalGroup);
 
         this._addSwitch(generalGroup, settings, 'water-enabled',
             _('Water Ripple (Ondas de Agua)'),
@@ -52,12 +53,12 @@ export default class CompizPreferences extends ExtensionPreferences {
             _('Dual Kawase Blur (Desenfoque de Fondo)'),
             _('Filtro de desenfoque multicapa O(8N) por GPU'));
 
-        // ─── SECCIÓN: ANNOTATE & PAINTFIRE ────────────────────────────────────
+        // SECCIÓN: ANNOTATE & PAINTFIRE
         const annotateGroup = new Adw.PreferencesGroup({
             title: _('Annotate & Paintfire'),
             description: _('Dibujo dinámico sobre la pantalla con fuego o tinta')
         });
-        page.add(annotateGroup);
+        effectsPage.add(annotateGroup);
 
         this._addSwitch(annotateGroup, settings, 'annotate-enabled',
             _('Habilitar Annotate'),
@@ -66,12 +67,12 @@ export default class CompizPreferences extends ExtensionPreferences {
         this._addSpinRow(annotateGroup, settings, 'annotate-brush-size',
             _('Tamaño del Pincel'), 1, 100, 1);
 
-        // ─── SECCIÓN: SHOWMOUSE & MAGNIFIER ──────────────────────────────────
+        // SECCIÓN: SHOWMOUSE & MAGNIFIER
         const showmouseGroup = new Adw.PreferencesGroup({
             title: _('Showmouse & Magnifier (Cursor & Lupa)'),
             description: _('Partículas de seguimiento del cursor y lupa dinámica')
         });
-        page.add(showmouseGroup);
+        effectsPage.add(showmouseGroup);
 
         this._addSwitch(showmouseGroup, settings, 'showmouse-enabled',
             _('Habilitar Showmouse'),
@@ -87,12 +88,12 @@ export default class CompizPreferences extends ExtensionPreferences {
         this._addSpinRow(showmouseGroup, settings, 'magnifier-zoom',
             _('Factor de Zoom (Lupa)'), 1.0, 10.0, 0.5);
 
-        // ─── SECCIÓN: FÍSICA Y PARÁMETROS ──────────────────────────────────────
+        // SECCIÓN: FÍSICA Y PARÁMETROS
         const physicsGroup = new Adw.PreferencesGroup({
             title: _('Parámetros de Física & Calidad'),
             description: _('Ajusta el comportamiento de las simulaciones en tiempo real')
         });
-        page.add(physicsGroup);
+        effectsPage.add(physicsGroup);
 
         this._addSpinRow(physicsGroup, settings, 'water-speed',
             _('Velocidad del Agua'), 0.1, 2.0, 0.1);
@@ -106,16 +107,63 @@ export default class CompizPreferences extends ExtensionPreferences {
         this._addSpinRow(physicsGroup, settings, 'blur-radius',
             _('Radio de Desenfoque (Blur)'), 1, 50, 1);
 
-        // ─── SECCIÓN: INFORMACIÓN DEL MOTOR ─────────────────────────────────────
-        const infoGroup = new Adw.PreferencesGroup({
-            title: _('Estado del Motor Offscreen C++20'),
-            description: _('Conexión Zero-Copy DMA-BUF vía Unix Socket SCM_RIGHTS')
+        // ─── TAB 2: CONFIGURACIÓN DE SISTEMA & IPC ───────────────────────────
+        const systemPage = new Adw.PreferencesPage({
+            title: _('Sistema & IPC'),
+            icon_name: 'emblem-system-symbolic'
         });
-        page.add(infoGroup);
+        window.add(systemPage);
+
+        // SECCIÓN: IPC UNIX SOCKET
+        const ipcGroup = new Adw.PreferencesGroup({
+            title: _('Conexión Motor C++20 / Vulkan 1.3'),
+            description: _('Configuración del canal IPC Unix Domain Socket y tasa física')
+        });
+        systemPage.add(ipcGroup);
+
+        this._addEntryRow(ipcGroup, settings, 'socket-path',
+            _('Ruta del Unix Socket IPC'),
+            _('Dejar en blanco para usar $XDG_RUNTIME_DIR/compiz_gnome_engine.sock por defecto'));
+
+        this._addSpinRow(ipcGroup, settings, 'fixed-timestep-hz',
+            _('Frecuencia Física (Hz)'), 30, 240, 10);
+
+        // SECCIÓN: ATAJOS DE TECLADO
+        const shortcutsGroup = new Adw.PreferencesGroup({
+            title: _('Atajos de Teclado del Sistema'),
+            description: _('Combos globales para activar efectos 3D y agrupamiento')
+        });
+        systemPage.add(shortcutsGroup);
+
+        this._addEntryRow(shortcutsGroup, settings, 'ring-shortcut',
+            _('Atajo Ring Switcher 3D'),
+            _('Por defecto: <Super>w'));
+
+        this._addEntryRow(shortcutsGroup, settings, 'shift-shortcut',
+            _('Atajo Shift Cover Flow'),
+            _('Por defecto: <Super>e'));
+
+        this._addEntryRow(shortcutsGroup, settings, 'expo-shortcut',
+            _('Atajo Expo / Scale'),
+            _('Por defecto: <Super>s'));
+
+        this._addEntryRow(shortcutsGroup, settings, 'group-shortcut',
+            _('Atajo Grouping Windows'),
+            _('Por defecto: <Super>g'));
+
+        // SECCIÓN: ESTADO DEL SERVICIO SYSTEMD Y DIAGNÓSTICO
+        const infoGroup = new Adw.PreferencesGroup({
+            title: _('Estado del Servicio Systemd & Vulkan Engine'),
+            description: _('Servicio de usuario en segundo plano')
+        });
+        systemPage.add(infoGroup);
+
+        const runtimeDir = GLib.get_user_runtime_dir();
+        const activePath = settings.get_string('socket-path') || `${runtimeDir}/compiz_gnome_engine.sock`;
 
         const statusRow = new Adw.ActionRow({
-            title: _('Servidor Offscreen'),
-            subtitle: _('Socket: /tmp/compiz_gnome_engine.sock (Vulkan 1.3 / 120Hz)')
+            title: _('Socket Activo'),
+            subtitle: activePath
         });
         infoGroup.add(statusRow);
     }
@@ -146,6 +194,15 @@ export default class CompizPreferences extends ExtensionPreferences {
         spin.valign = Gtk.Align.CENTER;
         row.add_suffix(spin);
         row.activatable_widget = spin;
+        group.add(row);
+    }
+
+    _addEntryRow(group, settings, key, title, subtitle) {
+        const row = new Adw.EntryRow({ title, subtitle });
+        row.text = settings.get_string(key) || '';
+        row.connect('changed', (entry) => {
+            settings.set_string(key, entry.text || '');
+        });
         group.add(row);
     }
 }

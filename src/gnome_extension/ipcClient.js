@@ -5,9 +5,29 @@ export class IpcClient {
     constructor(extension) {
         this._extension = extension;
         this._socket = null;
-        this._path = '/tmp/compiz-gnome-engine.sock';
+        this._path = this._resolveSocketPath();
         this._seq = 0;
     }
+
+    _resolveSocketPath() {
+        const configured = this._extension?._settings?.get_string('socket-path');
+        if (configured && configured.trim().length > 0) {
+            return configured.trim();
+        }
+
+        const envPath = GLib.getenv('COMPIZ_SOCKET_PATH');
+        if (envPath && envPath.trim().length > 0) {
+            return envPath.trim();
+        }
+
+        const runtimeDir = GLib.get_user_runtime_dir();
+        if (runtimeDir && runtimeDir.length > 0) {
+            return `${runtimeDir}/compiz_gnome_engine.sock`;
+        }
+
+        return '/tmp/compiz_gnome_engine.sock';
+    }
+
 
     async connect() {
         return new Promise((resolve, reject) => {

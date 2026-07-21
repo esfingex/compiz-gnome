@@ -4,13 +4,13 @@
 
     <!-- ===== EFECTOS ON/OFF ===== -->
     <key name="water-enabled" type="b">
-      <default>true</default>
+      <default>false</default>
       <summary>Activar efecto Water Ripple</summary>
       <description>Simula ondas de agua físicas al arrastrar ventanas</description>
     </key>
 
     <key name="wobbly-enabled" type="b">
-      <default>true</default>
+      <default>false</default>
       <summary>Activar efecto Wobbly Windows</summary>
       <description>Ventanas gelatinosas con física de resortes y Bézier bicúbica</description>
     </key>
@@ -28,26 +28,26 @@
     </key>
 
     <key name="ring-enabled" type="b">
-      <default>true</default>
+      <default>false</default>
       <summary>Activar Ring Switcher</summary>
       <description>Carrusel 3D inclinado para Alt+Tab</description>
     </key>
 
     <key name="animation-enabled" type="b">
-      <default>true</default>
+      <default>false</default>
       <summary>Activar Animation Suite</summary>
       <description>Magic Lamp, Curl, Explode al abrir/cerrar ventanas</description>
     </key>
 
     <key name="blur-enabled" type="b">
-      <default>true</default>
+      <default>false</default>
       <summary>Activar Dual Kawase Blur</summary>
       <description>Desenfoque de fondo multitap con computación GPU</description>
     </key>
 
     <!-- ===== ANNOTATE & PAINTFIRE ===== -->
     <key name="annotate-enabled" type="b">
-      <default>true</default>
+      <default>false</default>
       <summary>Habilitar Annotate &amp; Paintfire</summary>
     </key>
 
@@ -64,7 +64,7 @@
 
     <!-- ===== SHOWMOUSE ===== -->
     <key name="showmouse-enabled" type="b">
-      <default>true</default>
+      <default>false</default>
       <summary>Habilitar Showmouse</summary>
     </key>
 
@@ -105,9 +105,10 @@
 
     <!-- ===== GROUP ===== -->
     <key name="group-enabled" type="b">
-      <default>true</default>
+      <default>false</default>
       <summary>Habilitar Group (agrupación de ventanas)</summary>
     </key>
+
 
     <key name="group-shortcut" type="s">
       <default>'&lt;Super&gt;g'</default>
@@ -156,11 +157,18 @@
     </key>
 
     <!-- ===== CONFIGURACIÓN AVANZADA ===== -->
+    <key name="socket-path" type="s">
+      <default>''</default>
+      <summary>Ruta del Unix Domain Socket IPC</summary>
+      <description>Ruta al socket IPC (por defecto $XDG_RUNTIME_DIR/compiz_gnome_engine.sock o /tmp/compiz_gnome_engine.sock)</description>
+    </key>
+
     <key name="fixed-timestep-hz" type="i">
       <default>120</default>
       <range min="30" max="240"/>
       <summary>Frecuencia fija de simulación física (Hz)</summary>
     </key>
+
 
   </schema>
 </schemalist>
