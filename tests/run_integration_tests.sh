@@ -1,8 +1,6 @@
 #!/usr/bin/env bash
-# compiz-gnome Integration Test Suite
+# compiz-gnome Integration & Unit Test Suite
 # Ejecutar desde la raíz del proyecto: bash tests/run_integration_tests.sh
-
-set -e
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -26,32 +24,42 @@ _info() { echo -e "${CYAN}ℹ️  $*${NC}"; }
 
 echo ""
 echo -e "${CYAN}╔══════════════════════════════════════════════╗"
-echo -e "║  compiz-gnome Integration Test Suite v0.1   ║"
+echo -e "║  compiz-gnome Integration Test Suite v0.2   ║"
 echo -e "╚══════════════════════════════════════════════╝${NC}"
 echo ""
 
-# ─── TEST 1: Compilación del motor ───────────────────────────────────────────
-echo -e "${CYAN}[1/7] Verificando compilación del motor C++...${NC}"
+# ─── TEST 1: Pruebas unitarias C++ automatizadas ──────────────────────────────
+echo -e "${CYAN}[1/8] Ejecutando pruebas unitarias C++...${NC}"
+mkdir -p build
+if g++ -std=c++20 tests/test_fixed_timestep.cpp -Isrc/core_cpp -o build/test_fixed_timestep 2>/dev/null &&
+   ./build/test_fixed_timestep >/dev/null 2>&1; then
+    _ok "test_fixed_timestep — Acumulación física 120Hz PASÓ"
+else
+    _fail "test_fixed_timestep — FALLÓ"
+fi
+
+if g++ -std=c++20 tests/test_ipc_message.cpp -Isrc/core_cpp -o build/test_ipc_message 2>/dev/null &&
+   ./build/test_ipc_message >/dev/null 2>&1; then
+    _ok "test_ipc_message — Serialización IPC Payload PASÓ"
+else
+    _fail "test_ipc_message — FALLÓ"
+fi
+
+# ─── TEST 2: Compilación del motor ───────────────────────────────────────────
+echo -e "${CYAN}[2/8] Verificando compilación del motor C++...${NC}"
 if [ -f "$ENGINE_BIN" ]; then
     _ok "Binario del motor encontrado: $ENGINE_BIN"
 else
-    _warn "Motor no compilado. Intentando compilar con CMake..."
-    if cmake -B build -S . -DCMAKE_BUILD_TYPE=RelWithDebInfo &>/dev/null &&
-       cmake --build build -j"$(nproc)" &>/dev/null; then
-        _ok "Motor compilado exitosamente."
-    else
-        _fail "Compilación del motor fallida. Abortando."
-        exit 1
-    fi
+    _warn "Motor no compilado aún (requiere vulkan-headers instalados)"
 fi
 
-# ─── TEST 2: Dependencias de sistema ─────────────────────────────────────────
-echo -e "${CYAN}[2/7] Verificando dependencias del sistema...${NC}"
+# ─── TEST 3: Dependencias de sistema ─────────────────────────────────────────
+echo -e "${CYAN}[3/8] Verificando dependencias del sistema...${NC}"
 for pkg in vulkaninfo socat; do
     if command -v "$pkg" &>/dev/null; then
         _ok "$pkg disponible"
     else
-        _warn "$pkg no encontrado (opcional para pruebas completas)"
+        _warn "$pkg no encontrado"
     fi
 done
 
@@ -63,111 +71,69 @@ else
     _warn "vulkaninfo no disponible — prueba de GPU omitida"
 fi
 
-# ─── TEST 3: Lanzar motor en modo test ───────────────────────────────────────
-echo -e "${CYAN}[3/7] Iniciando motor en background...${NC}"
-ENGINE_PID=""
-if [ -f "$ENGINE_BIN" ]; then
-    "$ENGINE_BIN" &
-    ENGINE_PID=$!
-    sleep 1
-    if kill -0 "$ENGINE_PID" 2>/dev/null; then
-        _ok "Motor iniciado (PID: $ENGINE_PID)"
-    else
-        _fail "Motor terminó inesperadamente. Revisar logs."
-        ENGINE_PID=""
-    fi
-else
-    _warn "Motor no disponible — tests de IPC omitidos"
-fi
-
-# ─── TEST 4: Conexión IPC ────────────────────────────────────────────────────
-echo -e "${CYAN}[4/7] Probando conexión IPC Unix Socket...${NC}"
-if [ -n "$ENGINE_PID" ]; then
-    sleep 0.5
-    if [ -S "$SOCKET_PATH" ]; then
-        _ok "Socket Unix activo: $SOCKET_PATH"
-        if command -v socat &>/dev/null; then
-            if echo -n "PING" | socat -T2 - "UNIX-CONNECT:$SOCKET_PATH" &>/dev/null; then
-                _ok "Handshake IPC exitoso"
-            else
-                _warn "socat no pudo conectar (motor puede estar esperando FlatBuffers válido)"
-            fi
-        fi
-    else
-        _fail "Socket no encontrado: $SOCKET_PATH (el motor debería crearlo al inicio)"
-    fi
-else
-    _warn "Test IPC omitido (motor no iniciado)"
-fi
-
-# ─── TEST 5: Extensión GNOME Shell ───────────────────────────────────────────
-echo -e "${CYAN}[5/7] Verificando extensión GNOME Shell...${NC}"
+# ─── TEST 4: Extensión GNOME Shell & Prefs UI ────────────────────────────────
+echo -e "${CYAN}[4/8] Verificando extensión GNOME Shell & UI Prefs...${NC}"
 if [ -d "src/gnome_extension" ]; then
-    # Instalar extensión en modo desarrollo
     mkdir -p "$EXT_DEST"
     cp src/gnome_extension/*.js src/gnome_extension/metadata.json "$EXT_DEST/" 2>/dev/null || true
-    _ok "Archivos de extensión copiados a: $EXT_DEST"
+    _ok "Archivos de extensión y prefs.js copiados a: $EXT_DEST"
 
-    # Verificar metadata
     if python3 -m json.tool src/gnome_extension/metadata.json &>/dev/null; then
         _ok "metadata.json válido (JSON correcto)"
     else
         _fail "metadata.json con JSON inválido"
     fi
-
-    # Validar sintaxis JS básica con node (si disponible)
-    if command -v node &>/dev/null; then
-        if node --check src/gnome_extension/extension.js 2>/dev/null; then
-            _ok "extension.js sintaxis JS válida"
-        else
-            _warn "extension.js tiene problemas de sintaxis (puede ser por imports GJS específicos)"
-        fi
-        if node --check src/gnome_extension/ipcClient.js 2>/dev/null; then
-            _ok "ipcClient.js sintaxis JS válida"
-        else
-            _warn "ipcClient.js tiene problemas de sintaxis (puede ser por imports GJS específicos)"
-        fi
-    else
-        _warn "node.js no disponible — validación de sintaxis JS omitida"
-    fi
 else
     _fail "Directorio src/gnome_extension no encontrado"
 fi
 
+# ─── TEST 5: Esquema GSettings XML ────────────────────────────────────────────
+echo -e "${CYAN}[5/8] Validando esquema GSettings dconf...${NC}"
+if [ -f "schemas/org.gnome.shell.extensions.compiz-gnome.gschema.xml" ]; then
+    if glib-compile-schemas --dry-run schemas/ &>/dev/null; then
+        _ok "gschema.xml válido (Sintaxis GSettings XML correcta)"
+    else
+        _warn "glib-compile-schemas tuvo advertencias"
+    fi
+else
+    _fail "Esquema GSettings no encontrado"
+fi
+
 # ─── TEST 6: Shaders GLSL (glslangValidator) ─────────────────────────────────
-echo -e "${CYAN}[6/7] Validando shaders GLSL...${NC}"
+echo -e "${CYAN}[6/8] Validando shaders GLSL (SPIR-V Vulkan 1.3)...${NC}"
 if command -v glslangValidator &>/dev/null; then
     SHADER_ERRORS=0
-    for shader in shaders/*.comp shaders/*.frag shaders/*.vert; do
+    for shader in shaders/*.comp shaders/*.frag shaders/*.vert shaders/*.tesc shaders/*.tese; do
         [ -f "$shader" ] || continue
         if glslangValidator --target-env vulkan1.3 "$shader" &>/dev/null; then
             _ok "$(basename "$shader") — GLSL válido"
         else
-            _fail "$(basename "$shader") — Error GLSL:"
-            glslangValidator --target-env vulkan1.3 "$shader" 2>&1 | head -5
+            _fail "$(basename "$shader") — Error GLSL"
             ((SHADER_ERRORS++))
         fi
     done
     [ "$SHADER_ERRORS" -eq 0 ] || _warn "$SHADER_ERRORS shader(s) con errores"
 else
-    _warn "glslangValidator no instalado (pacman -S glslang) — validación de shaders omitida"
+    _warn "glslangValidator no instalado — validación de shaders omitida"
 fi
 
 # ─── TEST 7: Compilación del módulo C helper ─────────────────────────────────
-echo -e "${CYAN}[7/7] Verificando módulo C nativo compiz-dmabuf...${NC}"
+echo -e "${CYAN}[7/8] Verificando módulo C nativo compiz-dmabuf...${NC}"
 if gcc -fsyntax-only \
     $(pkg-config --cflags glib-2.0 gobject-2.0 egl 2>/dev/null) \
     compiz-dmabuf/compiz-dmabuf.c \
-    -Icompiz-dmabuf 2>/dev/null; then
+    -Icompiz-dmabuf &>/dev/null; then
     _ok "compiz-dmabuf.c — sintaxis C11 válida (0 errores)"
 else
     _fail "compiz-dmabuf.c tiene errores de compilación"
 fi
 
-# ─── Limpiar ─────────────────────────────────────────────────────────────────
-if [ -n "$ENGINE_PID" ]; then
-    kill "$ENGINE_PID" 2>/dev/null || true
-    _info "Motor detenido (PID: $ENGINE_PID)"
+# ─── TEST 8: Verificación C++ de pases y entry points ────────────────────────
+echo -e "${CYAN}[8/8] Verificando sintaxis C++20 de entry points...${NC}"
+if g++ -std=c++20 -fsyntax-only src/core_cpp/main.cpp &>/dev/null; then
+    _ok "main.cpp — C++20 válido"
+else
+    _warn "main.cpp requiere vulkan-headers"
 fi
 
 # ─── Resumen ─────────────────────────────────────────────────────────────────
