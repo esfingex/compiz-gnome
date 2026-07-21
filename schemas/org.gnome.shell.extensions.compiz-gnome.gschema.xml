@@ -1,0 +1,121 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<schemalist>
+  <schema id="org.gnome.shell.extensions.compiz-gnome" path="/org/gnome/shell/extensions/compiz-gnome/">
+
+    <!-- ===== EFECTOS ON/OFF ===== -->
+    <key name="water-enabled" type="b">
+      <default>true</default>
+      <summary>Activar efecto Water Ripple</summary>
+      <description>Simula ondas de agua físicas al arrastrar ventanas</description>
+    </key>
+
+    <key name="wobbly-enabled" type="b">
+      <default>true</default>
+      <summary>Activar efecto Wobbly Windows</summary>
+      <description>Ventanas gelatinosas con física de resortes y Bézier bicúbica</description>
+    </key>
+
+    <key name="burn-enabled" type="b">
+      <default>false</default>
+      <summary>Activar efecto Burn Firepaint</summary>
+      <description>Quema la ventana con partículas de fuego en Compute Shader</description>
+    </key>
+
+    <key name="shift-enabled" type="b">
+      <default>false</default>
+      <summary>Activar Shift Cover Flow</summary>
+      <description>Navegación de ventanas con reflexión planar y desenfoque glossy</description>
+    </key>
+
+    <key name="ring-enabled" type="b">
+      <default>true</default>
+      <summary>Activar Ring Switcher</summary>
+      <description>Carrusel 3D inclinado para Alt+Tab</description>
+    </key>
+
+    <key name="animation-enabled" type="b">
+      <default>true</default>
+      <summary>Activar Animation Suite</summary>
+      <description>Magic Lamp, Curl, Explode al abrir/cerrar ventanas</description>
+    </key>
+
+    <key name="blur-enabled" type="b">
+      <default>true</default>
+      <summary>Activar Dual Kawase Blur</summary>
+      <description>Desenfoque de fondo multitap con computación GPU</description>
+    </key>
+
+    <!-- ===== PARÁMETROS DE FÍSICA Y CALIDAD ===== -->
+    <key name="water-speed" type="d">
+      <default>0.5</default>
+      <range min="0.1" max="2.0"/>
+      <summary>Velocidad de propagación de ondas de agua</summary>
+    </key>
+
+    <key name="water-fade" type="d">
+      <default>0.995</default>
+      <range min="0.95" max="0.999"/>
+      <summary>Factor de decaimiento de ondas de agua</summary>
+    </key>
+
+    <key name="wobbly-spring-k" type="d">
+      <default>2.0</default>
+      <range min="0.5" max="10.0"/>
+      <summary>Constante de rigidez de resortes para Wobbly</summary>
+    </key>
+
+    <key name="wobbly-friction" type="d">
+      <default>0.8</default>
+      <range min="0.1" max="1.0"/>
+      <summary>Amortiguamiento de oscilaciones Wobbly</summary>
+    </key>
+
+    <key name="burn-particles" type="i">
+      <default>50000</default>
+      <range min="1000" max="100000"/>
+      <summary>Cantidad de partículas de fuego</summary>
+    </key>
+
+    <key name="burn-speed" type="d">
+      <default>1.0</default>
+      <range min="0.1" max="3.0"/>
+      <summary>Velocidad de combustión</summary>
+    </key>
+
+    <key name="blur-radius" type="i">
+      <default>15</default>
+      <range min="1" max="50"/>
+      <summary>Radio de desenfoque en píxeles</summary>
+    </key>
+
+    <key name="blur-iterations" type="i">
+      <default>3</default>
+      <range min="1" max="8"/>
+      <summary>Iteraciones de Kawase blur</summary>
+    </key>
+
+    <!-- ===== ATAJOS DE TECLADO ===== -->
+    <key name="ring-shortcut" type="s">
+      <default>'&lt;Super&gt;w'</default>
+      <summary>Atajo para abrir Ring Switcher</summary>
+    </key>
+
+    <key name="shift-shortcut" type="s">
+      <default>'&lt;Super&gt;e'</default>
+      <summary>Atajo para abrir Shift Cover Flow</summary>
+    </key>
+
+    <key name="expo-shortcut" type="s">
+      <default>'&lt;Super&gt;s'</default>
+      <summary>Atajo para abrir Expo/Scale</summary>
+    </key>
+
+    <!-- ===== CONFIGURACIÓN AVANZADA ===== -->
+    <key name="fixed-timestep-hz" type="i">
+      <default>120</default>
+      <range min="30" max="240"/>
+      <summary>Frecuencia fija de simulación física (Hz)</summary>
+    </key>
+
+  </schema>
+</schemalist>
