@@ -6,6 +6,19 @@ build/
 *.so
 *.dylib
 
+# Hojas de ruta locales, skills, planificación interna y memorias
+.planning/
+.skills/
+skills/
+.cavemem/
+cavemem/
+.brain/
+brain/
+.knowledge/
+knowledge/
+.gemini/
+scratch/
+
 # Python cache
 __pycache__/
 *.pyc
@@ -20,8 +33,9 @@ Makefile
 .mesonpy-relpath
 subprojects/
 
-# Editor
+# Editor / Sistema
 .vscode/
 .idea/
 *.swp
 *.swo
+.DS_Store
