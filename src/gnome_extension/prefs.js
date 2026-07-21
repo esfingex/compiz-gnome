@@ -198,11 +198,18 @@ export default class CompizPreferences extends ExtensionPreferences {
     }
 
     _addEntryRow(group, settings, key, title, subtitle) {
-        const row = new Adw.EntryRow({ title, subtitle });
-        row.text = settings.get_string(key) || '';
-        row.connect('changed', (entry) => {
-            settings.set_string(key, entry.text || '');
+        const row = new Adw.ActionRow({ title, subtitle });
+        const entry = new Gtk.Entry({
+            text: settings.get_string(key) || '',
+            valign: Gtk.Align.CENTER,
+            hexpand: true,
         });
+        entry.connect('changed', (e) => {
+            settings.set_string(key, e.text || e.get_text?.() || '');
+        });
+        row.add_suffix(entry);
+        row.activatable_widget = entry;
         group.add(row);
     }
+
 }
