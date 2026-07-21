@@ -1,0 +1,27 @@
+# Binarios SPIR-V compilados (generados por glslangValidator, no versionados)
+*.spv
+build/
+*.o
+*.a
+*.so
+*.dylib
+
+# Python cache
+__pycache__/
+*.pyc
+
+# CMake
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+
+# Meson
+.mesonpy-relpath
+subprojects/
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
