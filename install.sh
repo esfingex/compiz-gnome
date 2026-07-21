@@ -40,18 +40,18 @@ if command -v pacman &>/dev/null; then
     _info "Distribución detectada: Arch Linux / Manjaro (pacman)"
     sudo pacman -S --needed --noconfirm \
         vulkan-headers vulkan-icd-loader glslang cmake meson ninja \
-        glib2 gobject-introspection socat gcc python python-pip
+        glib2 gobject-introspection socat gcc python python-pip wayland-protocols wayland
 elif command -v apt-get &>/dev/null; then
     _info "Distribución detectada: Ubuntu / Debian (apt)"
     sudo apt-get update
     sudo apt-get install -y \
         libvulkan-dev vulkan-tools glslang-dev cmake meson ninja-build \
-        libglib2.0-dev libgirepository1.0-dev socat build-essential python3 python3-pip
+        libglib2.0-dev libgirepository1.0-dev socat build-essential python3 python3-pip wayland-protocols
 elif command -v dnf &>/dev/null; then
     _info "Distribución detectada: Fedora / RHEL (dnf)"
     sudo dnf install -y \
         vulkan-headers vulkan-loader-devel glslang cmake meson ninja-build \
-        glib2-devel gobject-introspection-devel socat gcc-c++ python3 python3-pip
+        glib2-devel gobject-introspection-devel socat gcc-c++ python3 python3-pip wayland-protocols-devel
 else
     _warn "Gestor de paquetes no identificado automáticamente. Asegúrate de tener vulkan-headers, cmake, meson y glslang."
 fi

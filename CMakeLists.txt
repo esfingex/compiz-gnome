@@ -16,7 +16,7 @@ find_package(Vulkan REQUIRED)
 find_package(PkgConfig REQUIRED)
 
 pkg_check_modules(WAYLAND_CLIENT REQUIRED wayland-client)
-pkg_check_modules(WAYLAND_PROTOCOLS REQUIRED wayland-protocols)
+pkg_check_modules(WAYLAND_PROTOCOLS wayland-protocols)
 
 # Include Directories
 include_directories(
