@@ -68,6 +68,6 @@ Cuando el usuario interactúa con una ventana rotada en 3D en Wayland:
 
 ---
 
-## 3. Registro en CaveMem y Verificación
+## 3. Registro de Arquitectura y Verificación
 
 - Se añade el patrón de Raycasting Inverso Wayland a la memoria de arquitectura de `compiz-gnome`.

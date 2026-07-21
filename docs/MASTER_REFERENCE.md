@@ -1684,7 +1684,7 @@ Cuando el usuario interactúa con una ventana rotada en 3D en Wayland:
 
 ---
 
-## 3. Registro en CaveMem y Verificación
+## 3. Registro de Arquitectura y Verificación
 
 - Se añade el patrón de Raycasting Inverso Wayland a la memoria de arquitectura de `compiz-gnome`.
 # Análisis Matemático y Modernización: Plugin Ring (Carrusel Circular / Elíptico 3D)
@@ -1758,7 +1758,7 @@ $$\theta(t + \Delta t) = \theta(t) + v(t + \Delta t) \Delta t$$
 
 ---
 
-## 3. Registro en CaveMem
+## 3. Registro de Arquitectura
 
 - Registrada la modernización de Ring Switcher a 3D real XZ orbit con Vulkan Depth Buffer.
 # Análisis Matemático y Modernización: Plugin Shift (Cover Flow & Flip Switcher con Reflexión Planar)
@@ -1838,9 +1838,9 @@ En lugar de un reflejo de espejo perfecto y plano:
 
 ---
 
-## 3. Registro en CaveMem
+## 3. Registro de Arquitectura
 
-- Registrada la matriz de reflexión planar $\mathbf{R}_{plane}$ y el blur de suelo Glossy con Compute Shader en CaveMem.
+- Registrada la matriz de reflexión planar $\mathbf{R}_{plane}$ y el blur de suelo Glossy con Compute Shader.
 # Análisis Matemático y Modernización: Suite Completa de Animaciones (Magic Lamp, Curl, Explode, etc.)
 
 ## Fuentes de Referencia

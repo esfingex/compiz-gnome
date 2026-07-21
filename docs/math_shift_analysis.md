@@ -75,6 +75,6 @@ En lugar de un reflejo de espejo perfecto y plano:
 
 ---
 
-## 3. Registro en CaveMem
+## 3. Registro de Arquitectura
 
-- Registrada la matriz de reflexión planar $\mathbf{R}_{plane}$ y el blur de suelo Glossy con Compute Shader en CaveMem.
+- Registrada la matriz de reflexión planar $\mathbf{R}_{plane}$ y el blur de suelo Glossy con Compute Shader.

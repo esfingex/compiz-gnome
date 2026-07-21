@@ -69,6 +69,6 @@ $$\theta(t + \Delta t) = \theta(t) + v(t + \Delta t) \Delta t$$
 
 ---
 
-## 3. Registro en CaveMem
+## 3. Registro de Arquitectura
 
 - Registrada la modernización de Ring Switcher a 3D real XZ orbit con Vulkan Depth Buffer.
