@@ -4,6 +4,9 @@
 #include "../framegraph.hpp"
 #include <vulkan/vulkan.h>
 #include <cstdint>
+#include <mutex>
+#include <unordered_map>
+#include <vector>
 
 namespace compiz::core::passes {
 

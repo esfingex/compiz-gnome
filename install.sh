@@ -89,8 +89,10 @@ _ok "Todos los Shaders GLSL compilados a SPIR-V."
 # ─── PASO 4: Compilación del Motor C++20 Offscreen con CMake/Ninja ─────────────
 _info "[4/6] Compilando el motor C++20 Offscreen con CMake / Ninja (-j${CPU_CORES})..."
 cd "$PROJECT_DIR"
-cmake -B build -S . -GNinja -DCMAKE_BUILD_TYPE=Release
-ninja -C build -j"$CPU_CORES"
+cmake -B build_user -S . -GNinja -DCMAKE_BUILD_TYPE=Release
+ninja -C build_user -j"$CPU_CORES"
+mkdir -p build
+cp build_user/compiz_gnome_engine build/compiz-engine-host 2>/dev/null || cp build_user/compiz_gnome_engine build/compiz_gnome_engine
 _ok "Binario ejecutable compiz_gnome_engine compilado exitosamente."
 
 # ─── PASO 5: Compilación e Instalación del Helper C Nativo compiz-dmabuf ──────
@@ -129,7 +131,7 @@ echo ""
 echo -e "${GREEN}${BOLD}🎉 ¡INSTALACIÓN Y COMPILACIÓN COMPLETADAS EXITOSAMENTE!${NC}"
 echo ""
 echo -e "Para iniciar el motor Offscreen en background:"
-echo -e "  ${CYAN}./build/compiz_gnome_engine &${NC}"
+echo -e "  ${CYAN}./build_user/compiz_gnome_engine &${NC}"
 echo ""
 echo -e "Para abrir el menú gráfico de configuración (CCSM Libadwaita):"
 echo -e "  ${CYAN}gnome-extensions prefs $EXT_UUID${NC}"
