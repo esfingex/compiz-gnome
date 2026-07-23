@@ -89,7 +89,7 @@ cmake --build build -j$(nproc)
 ### 2. Compilar Shaders GLSL a SPIR-V
 ```bash
 mkdir -p build/spv
-for shader in shaders/*.comp shaders/*.frag shaders/*.vert shaders/*.tesc shaders/*.tese; do
+for shader in src/shaders/*.comp src/shaders/*.frag src/shaders/*.vert src/shaders/*.tesc src/shaders/*.tese; do
     glslangValidator --target-env vulkan1.3 -V "$shader" -o "build/spv/$(basename $shader).spv"
 done
 ```

@@ -17,6 +17,17 @@ WobblyComputePass::~WobblyComputePass() {
     cleanup();
 }
 
+void WobblyComputePass::set_physics_params(float spring_k, float friction, uint32_t grid_res) {
+    push_constants_.spring_k = spring_k;
+    push_constants_.friction = friction;
+    if (grid_res >= 4 && grid_res <= 64) {
+        grid_width_ = grid_res;
+        grid_height_ = grid_res;
+        push_constants_.grid_width = grid_width_;
+        push_constants_.grid_height = grid_height_;
+    }
+}
+
 bool WobblyComputePass::init() {
     create_compute_pipeline();
     create_grid_buffers();

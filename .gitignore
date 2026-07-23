@@ -1,6 +1,9 @@
 # Binarios SPIR-V compilados (generados por glslangValidator, no versionados)
 *.spv
 build/
+build_user/
+*.egg-info
+schemas/gschemas.compiled
 *.o
 *.a
 *.so

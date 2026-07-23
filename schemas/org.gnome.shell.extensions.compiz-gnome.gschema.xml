@@ -123,20 +123,20 @@
     </key>
 
     <key name="wobbly-spring-k" type="d">
-      <default>2.0</default>
-      <range min="0.5" max="10.0"/>
-      <summary>Constante de rigidez de resortes para Wobbly (Tensión)</summary>
+      <default>0.80</default>
+      <range min="0.1" max="10.0"/>
+      <summary>Constante de tensión de resortes para Ventanas Gelatinosas</summary>
     </key>
 
     <key name="wobbly-friction" type="d">
-      <default>0.82</default>
-      <range min="0.5" max="0.99"/>
-      <summary>Amortiguamiento de fricción para Wobbly</summary>
+      <default>0.48</default>
+      <range min="0.1" max="0.99"/>
+      <summary>Fricción de amortiguamiento para Ventanas Gelatinosas</summary>
     </key>
 
     <key name="wobbly-max-deformation" type="d">
       <default>60.0</default>
-      <range min="10.0" max="200.0"/>
+      <range min="10.0" max="300.0"/>
       <summary>Deformación física máxima de Wobbly (px)</summary>
     </key>
 
@@ -146,11 +146,78 @@
       <summary>Sensibilidad del impulso por movimiento del ratón</summary>
     </key>
 
+    <key name="wobbly-grid-resolution" type="i">
+      <default>8</default>
+      <range min="4" max="64"/>
+      <summary>Resolución de la cuadrícula (nodos de la malla 2D)</summary>
+    </key>
+
+    <key name="wobbly-min-grid-size" type="i">
+      <default>4</default>
+      <range min="4" max="64"/>
+      <summary>Tamaño mínimo de cuadrícula</summary>
+    </key>
+
+    <key name="wobbly-effect-mode" type="s">
+      <default>'wobbly'</default>
+      <summary>Asignar efecto: wobbly, shiver, none</summary>
+    </key>
+
+    <key name="wobbly-focus-effect" type="s">
+      <default>'none'</default>
+      <summary>Efecto Enfocar: none, wobbly, shiver</summary>
+    </key>
+
+    <key name="wobbly-maximize-effect" type="b">
+      <default>true</default>
+      <summary>Efecto Maximizar al maximizar/desmaximizar</summary>
+    </key>
+
+    <key name="wobbly-snap-windows" type="b">
+      <default>true</default>
+      <summary>Solapar ventanas al acercarlas a los bordes</summary>
+    </key>
+
+    <key name="wobbly-snap-inverted" type="b">
+      <default>false</default>
+      <summary>Solapamiento inverso de ventanas</summary>
+    </key>
+
+    <key name="wobbly-match-assign" type="s">
+      <default>'Toolbar | Menu | Utility | Dialog | Normal | Splash | DropdownMenu | PopupMenu | Tooltip | Notification | Dnd | Unknown'</default>
+      <summary>Asignar ventanas (Regla de coincidencia)</summary>
+    </key>
+
+    <key name="wobbly-match-move" type="s">
+      <default>'Toolbar | Menu | Utility | Dialog | Normal | Splash | DropdownMenu | PopupMenu | Tooltip | Notification | Dnd | Unknown'</default>
+      <summary>Mover ventanas (Regla de coincidencia)</summary>
+    </key>
+
+    <key name="wobbly-match-grab" type="s">
+      <default>'Toolbar | Menu | Utility | Dialog | Normal | Splash | DropdownMenu | PopupMenu | Tooltip | Notification | Dnd | Unknown'</default>
+      <summary>Agarrar ventanas (Regla de coincidencia)</summary>
+    </key>
+
+    <key name="wobbly-match-focus" type="s">
+      <default>'Toolbar | Menu | Utility | Dialog | Normal | Splash | DropdownMenu | PopupMenu | Tooltip | Notification | Dnd | Unknown'</default>
+      <summary>Enfocar ventanas (Regla de coincidencia)</summary>
+    </key>
+
 
     <key name="burn-particles" type="i">
       <default>50000</default>
       <range min="1000" max="100000"/>
       <summary>Cantidad de partículas de fuego</summary>
+    </key>
+
+    <key name="burn-color-preset" type="s">
+      <default>'fire'</default>
+      <summary>Paleta de Color del Fuego: fire, blue, green, purple, gold, custom</summary>
+    </key>
+
+    <key name="burn-custom-color" type="s">
+      <default>'#ff6600'</default>
+      <summary>Color personalizado del fuego en formato hexadecimal (#RRGGBB)</summary>
     </key>
 
     <key name="blur-radius" type="i">

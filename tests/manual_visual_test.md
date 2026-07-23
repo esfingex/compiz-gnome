@@ -56,7 +56,7 @@ g++ -std=c++20 -O2 \
 # Compilar todos los shaders del directorio
 mkdir -p build/spv
 
-for shader in shaders/*.comp shaders/*.frag shaders/*.vert; do
+for shader in src/shaders/*.comp src/shaders/*.frag src/shaders/*.vert; do
     name=$(basename "$shader")
     glslangValidator --target-env vulkan1.3 -V "$shader" -o "build/spv/${name}.spv"
     echo "✅ $name → build/spv/${name}.spv"

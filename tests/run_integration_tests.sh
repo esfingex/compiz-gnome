@@ -115,7 +115,7 @@ fi
 echo -e "${CYAN}[6/8] Validando shaders GLSL (SPIR-V Vulkan 1.3)...${NC}"
 if command -v glslangValidator &>/dev/null; then
     SHADER_ERRORS=0
-    for shader in shaders/*.comp shaders/*.frag shaders/*.vert shaders/*.tesc shaders/*.tese; do
+    for shader in src/shaders/*.comp src/shaders/*.frag src/shaders/*.vert src/shaders/*.tesc src/shaders/*.tese; do
         [ -f "$shader" ] || continue
         if glslangValidator --target-env vulkan1.3 "$shader" &>/dev/null; then
             _ok "$(basename "$shader") — GLSL válido"

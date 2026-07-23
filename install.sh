@@ -67,6 +67,7 @@ fi
 
 # ─── PASO 3: Compilación paralela de Shaders GLSL a SPIR-V ───────────────────
 _info "[3/6] Compilando Shaders GLSL a SPIR-V Vulkan 1.3 en paralelo (${CPU_CORES} hilos)..."
+rm -f "$PROJECT_DIR"/*.spv
 mkdir -p "$PROJECT_DIR/build/spv"
 
 export PROJECT_DIR CPU_CORES
@@ -82,7 +83,7 @@ compile_shader() {
 }
 export -f compile_shader
 
-find "$PROJECT_DIR/shaders" -type f \( -name "*.comp" -o -name "*.frag" -o -name "*.vert" -o -name "*.tesc" -o -name "*.tese" \) | \
+find "$PROJECT_DIR/src/shaders" -type f \( -name "*.comp" -o -name "*.frag" -o -name "*.vert" -o -name "*.tesc" -o -name "*.tese" \) | \
     xargs -P "$CPU_CORES" -I {} bash -c 'compile_shader "$@"' _ {}
 
 _ok "Todos los Shaders GLSL compilados a SPIR-V."

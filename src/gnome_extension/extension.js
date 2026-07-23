@@ -1,210 +1,21 @@
-// GNOME Shell 50+ Extension — Compiz GNOME Effects
-// Integra: Wobbly Windows (Física Resorte-Masa parametrizable en tiempo real),
-// Water Ripple, IpcClient (Unix Socket), reactividad GSettings y ciclo de vida de Mutter.
+// GNOME Shell 50+ Extension — Compiz GNOME Effects (Entrypoint Orquestador Limpio)
+// Integra: Ciclo de vida Mutter, IPC Client, GSettings reactivos y gestión modular de efectos.
 
 import { Extension } from 'resource:///org/gnome/shell/extensions/extension.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
-import GObject from 'gi://GObject';
 import Clutter from 'gi://Clutter';
-import Meta from 'gi://Meta';
-import Shell from 'gi://Shell';
 import GLib from 'gi://GLib';
 import { IpcClient } from './ipcClient.js';
+import { WobblyEffect } from './effects/wobbly.js';
+import { WaterEffect } from './effects/water.js';
+import { BurnEffect } from './effects/burn.js';
 
-// ─────────────────────────────────────────────────────────────────────────────
-// WobblyEffect: ClutterEffect de ventanas gelatinosas (Física Resorte-Masa)
-// ─────────────────────────────────────────────────────────────────────────────
-const WobblyEffect = GObject.registerClass(
-{
-    GTypeName: 'CompizWobblyEffect',
-},
-class WobblyEffect extends Clutter.Effect {
-    _init(settings) {
-        super._init();
-        this._settings = settings;
-        this._lastPx = 0;
-        this._lastPy = 0;
-        this._vx = 0;
-        this._vy = 0;
-        this._dx = 0;
-        this._dy = 0;
-        this._isDragging = false;
-        this._animId = null;
-    }
-
-    onGrabBegin() {
-        const [px, py] = global.get_pointer();
-        this._isDragging = true;
-        this._lastPx = px;
-        this._lastPy = py;
-        this._startLoop();
-    }
-
-    onGrabEnd() {
-        this._isDragging = false;
-    }
-
-    _startLoop() {
-        if (this._animId) return;
-        this._animId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 16, () => {
-            // Leer parámetros físicos configurables dinámicamente desde GSettings (dconf)
-            const springK   = this._settings?.get_double('wobbly-spring-k') ?? 2.0;
-            const friction  = this._settings?.get_double('wobbly-friction') ?? 0.82;
-            const maxDeform = this._settings?.get_double('wobbly-max-deformation') ?? 60.0;
-            const impulse   = this._settings?.get_double('wobbly-impulse') ?? 0.60;
-
-            const k = springK * 0.08;
-
-            // Seguimiento directo del puntero en Wayland a 60-120Hz
-            if (this._isDragging) {
-                const [px, py] = global.get_pointer();
-                const deltaX = px - this._lastPx;
-                const deltaY = py - this._lastPy;
-                this._lastPx = px;
-                this._lastPy = py;
-
-                this._vx += deltaX * impulse;
-                this._vy += deltaY * impulse;
-            }
-
-            // Ley de Hooke con amortiguamiento viscoso
-            const ax = -k * this._dx - (1.0 - friction) * this._vx;
-            const ay = -k * this._dy - (1.0 - friction) * this._vy;
-
-            this._vx += ax;
-            this._vy += ay;
-
-            this._dx += this._vx;
-            this._dy += this._vy;
-
-            // Clampear deformación máxima según preferencia configurada
-            this._dx = Math.max(-maxDeform, Math.min(maxDeform, this._dx));
-            this._dy = Math.max(-maxDeform, Math.min(maxDeform, this._dy));
-
-            // Detener bucle cuando la ventana vuelve al reposo completo
-            if (!this._isDragging &&
-                Math.abs(this._dx) < 0.1 && Math.abs(this._dy) < 0.1 &&
-                Math.abs(this._vx) < 0.1 && Math.abs(this._vy) < 0.1) {
-                this._dx = 0;
-                this._dy = 0;
-                this._vx = 0;
-                this._vy = 0;
-                this._animId = null;
-                this._applyDeformation();
-                return GLib.SOURCE_REMOVE;
-            }
-
-            this._applyDeformation();
-            return GLib.SOURCE_CONTINUE;
-        });
-    }
-
-    _applyDeformation() {
-        const actor = this.get_actor();
-        if (!actor) return;
-
-        // Aplicar transformación sobre el actor hijo (superficie), de forma que Mutter
-        // no invalide la matriz del actor contenedor raíz.
-        const targetActor = actor.first_child || actor;
-
-        targetActor.set_pivot_point(0.5, 0.0);
-
-        // Inclinación según desplazamiento horizontal (máx ±35°)
-        const rotZ = Math.max(-35.0, Math.min(35.0, this._dx * 0.25));
-
-        // Deformación elástica vertical y horizontal
-        const scaleX = 1.0 - Math.min(0.35, Math.abs(this._dy) * 0.0025);
-        const scaleY = 1.0 + Math.min(0.35, Math.abs(this._dy) * 0.0025);
-
-        // Traslación de inercia
-        const transX = -this._dx * 0.35;
-        const transY = -this._dy * 0.35;
-
-        targetActor.set_rotation_angle(Clutter.RotateAxis.Z_AXIS, rotZ);
-        targetActor.set_scale(scaleX, scaleY);
-        targetActor.set_translation(transX, transY, 0);
-
-        actor.queue_redraw();
-    }
-
-    destroy() {
-        if (this._animId) {
-            GLib.source_remove(this._animId);
-            this._animId = null;
-        }
-        const actor = this.get_actor();
-        if (actor) {
-            const targetActor = actor.first_child || actor;
-            targetActor.set_rotation_angle(Clutter.RotateAxis.Z_AXIS, 0);
-            targetActor.set_scale(1.0, 1.0);
-            targetActor.set_translation(0, 0, 0);
-        }
-        super.run_dispose?.();
-    }
-});
-
-// ─────────────────────────────────────────────────────────────────────────────
-// WaterEffect: ClutterEffect para ondas de agua
-// ─────────────────────────────────────────────────────────────────────────────
-const WaterEffect = GObject.registerClass(
-{
-    GTypeName: 'CompizWaterEffect',
-},
-class WaterEffect extends Clutter.Effect {
-    _init(ipc, windowId) {
-        super._init();
-        this._ipc = ipc;
-        this._windowId = windowId;
-        this._active = false;
-        this._fadeId = null;
-        this._alpha = 0.0;
-    }
-
-    triggerImpact() {
-        this._active = true;
-        this._alpha = 1.0;
-        if (this._fadeId) GLib.source_remove(this._fadeId);
-        this._fadeId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 16, () => {
-            this._alpha -= 0.015;
-            if (this._alpha <= 0.0) {
-                this._alpha = 0.0;
-                this._active = false;
-                this._fadeId = null;
-                return GLib.SOURCE_REMOVE;
-            }
-            this.queue_repaint();
-            return GLib.SOURCE_CONTINUE;
-        });
-    }
-
-    vfunc_paint(paintNode, paintContext) {
-        const actor = this.get_actor();
-        if (!actor) return;
-
-        actor.continue_paint(paintContext);
-        if (this._active && this._alpha > 0) {
-            this.queue_repaint();
-        }
-    }
-
-    destroy() {
-        if (this._fadeId) {
-            GLib.source_remove(this._fadeId);
-            this._fadeId = null;
-        }
-        super.run_dispose?.();
-    }
-});
-
-// ─────────────────────────────────────────────────────────────────────────────
-// CompizExtension: Clase principal de la extensión GNOME Shell 50+
-// ─────────────────────────────────────────────────────────────────────────────
 export default class CompizExtension extends Extension {
     constructor(metadata) {
         super(metadata);
         this._ipc = null;
         this._settings = null;
-        this._windowActors = new Map(); // windowId -> { actor, metaWindow, waterEffect, wobblyEffect, posId, destroyId }
+        this._windowActors = new Map(); // windowId -> { actor, metaWindow, waterEffect, wobblyEffect, burnEffect... }
         this._signalIds = [];
     }
 
@@ -217,6 +28,7 @@ export default class CompizExtension extends Extension {
         // Escuchar cambios reactivos de configuración desde el panel de preferencias
         this._settings.connect('changed::wobbly-enabled', () => this._syncAllEffects());
         this._settings.connect('changed::water-enabled', () => this._syncAllEffects());
+        this._settings.connect('changed::burn-enabled', () => this._syncAllEffects());
 
         // 2. Conectar con el motor C++/Vulkan por IPC Unix Socket
         this._ipc = new IpcClient(this);
@@ -320,12 +132,45 @@ export default class CompizExtension extends Extension {
                 this._onWindowDestroyed(windowId);
             });
 
+            const focusId = metaWindow.connect('focus', () => {
+                entry.wobblyEffect?.triggerFocusWobble();
+            });
+
+            const sizeId = metaWindow.connect('size-changed', () => {
+                entry.wobblyEffect?.triggerMaximizeWobble();
+            });
+
+            let lastX = actor.x;
+            let lastY = actor.y;
+
+            const posXId = actor.connect('notify::x', () => {
+                const curX = actor.x;
+                const dx = curX - lastX;
+                lastX = curX;
+                if (Math.abs(dx) > 0.1 && entry.wobblyEffect) {
+                    entry.wobblyEffect.onActorPositionChanged(dx, 0);
+                }
+            });
+
+            const posYId = actor.connect('notify::y', () => {
+                const curY = actor.y;
+                const dy = curY - lastY;
+                lastY = curY;
+                if (Math.abs(dy) > 0.1 && entry.wobblyEffect) {
+                    entry.wobblyEffect.onActorPositionChanged(0, dy);
+                }
+            });
+
             const entry = {
                 actor,
                 metaWindow,
                 waterEffect: null,
                 wobblyEffect: null,
-                destroyId
+                destroyId,
+                focusId,
+                sizeId,
+                posXId,
+                posYId,
             };
             this._windowActors.set(windowId, entry);
 
@@ -349,10 +194,11 @@ export default class CompizExtension extends Extension {
 
         const wobblyEnabled = this._settings?.get_boolean('wobbly-enabled') ?? false;
         const waterEnabled  = this._settings?.get_boolean('water-enabled') ?? false;
+        const burnEnabled   = this._settings?.get_boolean('burn-enabled') ?? false;
 
         // Wobbly Windows
         if (wobblyEnabled && !entry.wobblyEffect) {
-            entry.wobblyEffect = new WobblyEffect(this._settings);
+            entry.wobblyEffect = new WobblyEffect(this._settings, entry.metaWindow);
             entry.actor.add_effect_with_name('compiz-wobbly', entry.wobblyEffect);
         } else if (!wobblyEnabled && entry.wobblyEffect) {
             entry.actor.remove_effect(entry.wobblyEffect);
@@ -368,6 +214,17 @@ export default class CompizExtension extends Extension {
             entry.actor.remove_effect(entry.waterEffect);
             entry.waterEffect.destroy();
             entry.waterEffect = null;
+        }
+
+        // Burn Firepaint
+        if (burnEnabled && !entry.burnEffect) {
+            entry.burnEffect = new BurnEffect(this._settings, entry.metaWindow);
+            entry.actor.add_effect_with_name('compiz-burn', entry.burnEffect);
+            entry.burnEffect.triggerBurn();
+        } else if (!burnEnabled && entry.burnEffect) {
+            entry.actor.remove_effect(entry.burnEffect);
+            entry.burnEffect.destroy();
+            entry.burnEffect = null;
         }
     }
 
@@ -386,8 +243,20 @@ export default class CompizExtension extends Extension {
 
     _cleanupWindowEntry(entry) {
         try {
+            if (entry.metaWindow && entry.focusId) {
+                entry.metaWindow.disconnect(entry.focusId);
+            }
+            if (entry.metaWindow && entry.sizeId) {
+                entry.metaWindow.disconnect(entry.sizeId);
+            }
             if (entry.actor && entry.destroyId) {
                 entry.actor.disconnect(entry.destroyId);
+            }
+            if (entry.actor && entry.posXId) {
+                entry.actor.disconnect(entry.posXId);
+            }
+            if (entry.actor && entry.posYId) {
+                entry.actor.disconnect(entry.posYId);
             }
             if (entry.wobblyEffect) {
                 entry.actor?.remove_effect(entry.wobblyEffect);
@@ -398,6 +267,11 @@ export default class CompizExtension extends Extension {
                 entry.actor?.remove_effect(entry.waterEffect);
                 entry.waterEffect.destroy();
                 entry.waterEffect = null;
+            }
+            if (entry.burnEffect) {
+                entry.actor?.remove_effect(entry.burnEffect);
+                entry.burnEffect.destroy();
+                entry.burnEffect = null;
             }
         } catch (_) { /* silencioso */ }
     }

@@ -56,3 +56,51 @@ export class WinRulesEngine {
         }
     }
 }
+
+/**
+ * Evalúa si una ventana (MetaWindow) coincide con la expresión de regla estilo Compiz CCSM.
+ * Ejemplo de regla: "Splash | DropdownMenu | PopupMenu | Tooltip | Notification | Dnd | Normal"
+ * @param {Meta.Window} metaWindow 
+ * @param {string} ruleString 
+ * @returns {boolean}
+ */
+export function matchCompizRule(metaWindow, ruleString) {
+    if (!metaWindow || !ruleString || !ruleString.trim()) return true;
+
+    const windowType = metaWindow.get_window_type?.() ?? Meta.WindowType.NORMAL;
+    const wmClass = (metaWindow.get_wm_class?.() || '').toLowerCase();
+    const title = (metaWindow.get_title?.() || '').toLowerCase();
+
+    // Mapeo de Meta.WindowType a nombres Compiz
+    const typeNames = [];
+    switch (windowType) {
+        case Meta.WindowType.NORMAL:        typeNames.push('normal'); break;
+        case Meta.WindowType.DIALOG:
+        case Meta.WindowType.MODAL_DIALOG:  typeNames.push('dialog'); break;
+        case Meta.WindowType.MENU:          typeNames.push('menu'); break;
+        case Meta.WindowType.TOOLBAR:       typeNames.push('toolbar'); break;
+        case Meta.WindowType.UTILITY:       typeNames.push('utility'); break;
+        case Meta.WindowType.SPLASHSCREEN:   typeNames.push('splash'); break;
+        case Meta.WindowType.DROPDOWN_MENU: typeNames.push('dropdownmenu'); break;
+        case Meta.WindowType.POPUP_MENU:    typeNames.push('popupmenu'); break;
+        case Meta.WindowType.TOOLTIP:       typeNames.push('tooltip'); break;
+        case Meta.WindowType.NOTIFICATION:  typeNames.push('notification'); break;
+        case Meta.WindowType.DND:           typeNames.push('dnd'); break;
+        default:                            typeNames.push('unknown'); break;
+    }
+
+    const tokens = ruleString.split('|').map(t => t.trim().toLowerCase()).filter(Boolean);
+
+    for (const token of tokens) {
+        // Coincidencia con tipo de ventana
+        if (typeNames.includes(token)) return true;
+        // Coincidencia con WM_CLASS o Título
+        if (wmClass.includes(token) || title.includes(token)) return true;
+        // Coincidencia tipo `class=Foo` o `type=Bar`
+        if (token.startsWith('class=') && wmClass.includes(token.replace('class=', ''))) return true;
+        if (token.startsWith('title=') && title.includes(token.replace('title=', ''))) return true;
+    }
+
+    return false;
+}
+

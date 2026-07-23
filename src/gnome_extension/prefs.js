@@ -27,17 +27,37 @@ export default class CompizPreferences extends ExtensionPreferences {
 
         // 1. WOBBLY WINDOWS
         this._addExpanderGroup(effectsGroup, settings, 'wobbly-enabled',
-            _('🪟 Wobbly Windows (Ventanas Gelatinosas)'),
-            _('Simulación física resorte-masa con Bézier bicúbica'),
+            _('🪟 Ventanas Gelatinosas (Wobbly Windows)'),
+            _('Simulación física resorte-masa con malla de deformación 2D'),
             (expander) => {
-                this._addSpinRow(expander, settings, 'wobbly-spring-k',
-                    _('Tensión / Rigidez del Resorte (K)'), 0.5, 10.0, 0.5);
+                this._addSwitchRow(expander, settings, 'wobbly-snap-windows',
+                    _('Solapar ventanas'));
+                this._addSwitchRow(expander, settings, 'wobbly-snap-inverted',
+                    _('Solapamiento inverso'));
+                this._addComboRow(expander, settings, 'wobbly-effect-mode',
+                    _('Asignar efecto'),
+                    [['wobbly', _('Ventanas Gelatinosas')], ['shiver', _('Temblor')], ['none', _('Ninguno')]]);
                 this._addSpinRow(expander, settings, 'wobbly-friction',
-                    _('Amortiguamiento de Fricción'), 0.5, 0.99, 0.05);
-                this._addSpinRow(expander, settings, 'wobbly-max-deformation',
-                    _('Deformación Máxima Permitida (px)'), 10, 200, 10);
-                this._addSpinRow(expander, settings, 'wobbly-impulse',
-                    _('Sensibilidad al Movimiento del Ratón'), 0.1, 3.0, 0.1);
+                    _('Fricción'), 0.1, 0.99, 0.01);
+                this._addSpinRow(expander, settings, 'wobbly-spring-k',
+                    _('Constante de tensión'), 0.1, 10.0, 0.05);
+                this._addSpinRow(expander, settings, 'wobbly-grid-resolution',
+                    _('Resolución de la cuadrícula'), 4, 64, 1);
+                this._addSpinRow(expander, settings, 'wobbly-min-grid-size',
+                    _('Tamaño mínimo de cuadrícula'), 4, 64, 1);
+                this._addComboRow(expander, settings, 'wobbly-focus-effect',
+                    _('Efecto Enfocar'),
+                    [['none', _('Ninguno')], ['wobbly', _('Ventanas Gelatinosas')], ['shiver', _('Temblor')]]);
+                this._addEntryRow(expander, settings, 'wobbly-match-assign',
+                    _('Asignar ventanas'), _('Ej: Splash | DropdownMenu | PopupMenu | Tooltip | Notification | Dnd | Unknown'));
+                this._addEntryRow(expander, settings, 'wobbly-match-focus',
+                    _('Enfocar ventanas'), _('Reglas de coincidencia para efecto enfocar'));
+                this._addEntryRow(expander, settings, 'wobbly-match-grab',
+                    _('Agarrar ventanas'), _('Reglas de coincidencia para agarrar'));
+                this._addEntryRow(expander, settings, 'wobbly-match-move',
+                    _('Mover ventanas'), _('Ej: Toolbar | Menu | Utility | Dialog | Normal | Unknown'));
+                this._addSwitchRow(expander, settings, 'wobbly-maximize-effect',
+                    _('Efecto Maximizar'));
             }
         );
 
@@ -54,10 +74,22 @@ export default class CompizPreferences extends ExtensionPreferences {
         // 3. BURN FIREPAINT
         this._addExpanderGroup(effectsGroup, settings, 'burn-enabled',
             _('🔥 Burn Firepaint (Efecto de Fuego)'),
-            _('Quema ventanas con 65k partículas Compute Shader'),
+            _('Quema ventanas con 65k partículas Compute Shader y paletas de color personalizadas'),
             (expander) => {
                 this._addSpinRow(expander, settings, 'burn-particles',
                     _('Cantidad de Partículas de Fuego'), 1000, 100000, 5000);
+                this._addComboRow(expander, settings, 'burn-color-preset',
+                    _('Color / Paleta del Fuego'),
+                    [
+                        ['fire', _('🔥 Fuego Clásico (Naranja / Rojo)')],
+                        ['blue', _('⚡ Fuego de Plasma Azul')],
+                        ['green', _('🧪 Fuego Verde Tóxico')],
+                        ['purple', _('🔮 Fuego Púrpura Místico')],
+                        ['gold', _('🌟 Fuego Dorado Solar')],
+                        ['custom', _('🎨 Color Personalizado (HEX)')]
+                    ]);
+                this._addEntryRow(expander, settings, 'burn-custom-color',
+                    _('Color Personalizado (Hex)'), _('Ejemplo: #ff0055 o #00ffcc'));
             }
         );
 
@@ -187,11 +219,9 @@ export default class CompizPreferences extends ExtensionPreferences {
     }
 
     _addExpanderGroup(group, settings, enableKey, title, subtitle, setupSubRowsCallback) {
-        const expander = new Adw.ExpanderRow({
-            title,
-            subtitle,
-            show_enable_switch: true,
-        });
+        const rowProps = { title, show_enable_switch: true };
+        if (subtitle) rowProps.subtitle = subtitle;
+        const expander = new Adw.ExpanderRow(rowProps);
 
         settings.bind(enableKey, expander, 'enable-expansion', Gio.SettingsBindFlags.DEFAULT);
         setupSubRowsCallback(expander);
@@ -221,7 +251,9 @@ export default class CompizPreferences extends ExtensionPreferences {
     }
 
     _addEntryRow(container, settings, key, title, subtitle) {
-        const row = new Adw.ActionRow({ title, subtitle });
+        const rowProps = { title };
+        if (subtitle) rowProps.subtitle = subtitle;
+        const row = new Adw.ActionRow(rowProps);
         const entry = new Gtk.Entry({
             text: settings.get_string(key) || '',
             valign: Gtk.Align.CENTER,
@@ -239,4 +271,48 @@ export default class CompizPreferences extends ExtensionPreferences {
             container.add(row);
         }
     }
+
+    _addSwitchRow(container, settings, key, title, subtitle) {
+        const rowProps = { title };
+        if (subtitle) rowProps.subtitle = subtitle;
+        const row = new Adw.ActionRow(rowProps);
+        const toggle = new Gtk.Switch({
+            active: settings.get_boolean(key),
+            valign: Gtk.Align.CENTER,
+        });
+        settings.bind(key, toggle, 'active', Gio.SettingsBindFlags.DEFAULT);
+        row.add_suffix(toggle);
+        row.activatable_widget = toggle;
+
+        if (container.add_row) container.add_row(row);
+        else container.add(row);
+    }
+
+    _addComboRow(container, settings, key, title, options) {
+        const row = new Adw.ActionRow({ title });
+        const model = new Gtk.StringList();
+        options.forEach(([id, label]) => model.append(label));
+        const combo = new Gtk.DropDown({
+            model,
+            valign: Gtk.Align.CENTER,
+        });
+
+        const currentVal = settings.get_string(key);
+        const idx = options.findIndex(([id]) => id === currentVal);
+        if (idx >= 0) combo.set_selected(idx);
+
+        combo.connect('notify::selected', () => {
+            const selIdx = combo.get_selected();
+            if (selIdx >= 0 && selIdx < options.length) {
+                settings.set_string(key, options[selIdx][0]);
+            }
+        });
+
+        row.add_suffix(combo);
+        row.activatable_widget = combo;
+
+        if (container.add_row) container.add_row(row);
+        else container.add(row);
+    }
 }
+

@@ -11,12 +11,12 @@ namespace compiz::core::passes {
 
 // Parametros fisicos del sistema de resortes (layout compatible con push constants)
 struct WobblyPushConstants {
-    float    spring_k{2.0f};          // Constante elastica (N/m)
-    float    friction{0.8f};          // Coeficiente de amortiguamiento viscoso
+    float    spring_k{0.80f};         // Constante elastica (N/m)
+    float    friction{0.48f};         // Coeficiente de amortiguamiento viscoso
     float    mass{1.0f};              // Masa de cada vertice (kg)
     float    dt{1.0f / 120.0f};       // Paso de tiempo fijo (s)
-    uint32_t grid_width{32};
-    uint32_t grid_height{32};
+    uint32_t grid_width{8};
+    uint32_t grid_height{8};
 };
 
 // Impulso externo: arrastre de ventana o liberacion de boton
@@ -33,9 +33,12 @@ struct WobblyImpulse {
 class WobblyComputePass {
 public:
     WobblyComputePass(vulkan::VulkanContext& ctx,
-                      uint32_t grid_width  = 32,
-                      uint32_t grid_height = 32);
+                      uint32_t grid_width  = 8,
+                      uint32_t grid_height = 8);
     ~WobblyComputePass();
+
+    // Configura parámetros físicos dinámicamente
+    void set_physics_params(float spring_k, float friction, uint32_t grid_res);
 
     // Inicializa pipelines, buffers de resortes y posiciones de reposo
     bool init();
