@@ -9,7 +9,9 @@ CYAN='\033[0;36m'
 NC='\033[0m'
 
 SOCKET_PATH="/tmp/compiz_gnome_engine.sock"
-ENGINE_BIN="./build_user/compiz_gnome_engine"
+ENGINE_BIN="./build/compiz-engine-host"
+[ -f "$ENGINE_BIN" ] || ENGINE_BIN="./build/compiz_gnome_engine"
+[ -f "$ENGINE_BIN" ] || ENGINE_BIN="./build_user/compiz_gnome_engine"
 EXT_UUID="compiz-effects@esfingex.github.com"
 EXT_DEST="$HOME/.local/share/gnome-shell/extensions/$EXT_UUID"
 
